@@ -95,8 +95,10 @@ class HoldKeyForegroundTest(unittest.TestCase):
     def fake_task(self, foreground):
         from types import SimpleNamespace
 
+        from src.tasks.BaseBD2Task import BaseBD2Task
+
         info = {}
-        return SimpleNamespace(
+        task = SimpleNamespace(
             operate=lambda fun, **_kwargs: fun(),
             _bring_game_to_foreground=lambda: foreground,
             info_set=info.__setitem__,
@@ -104,6 +106,10 @@ class HoldKeyForegroundTest(unittest.TestCase):
             sleep=lambda _seconds: None,
             info=info,
         )
+        task._send_game_key = lambda code, seconds: BaseBD2Task._send_game_key(
+            task, code, seconds
+        )
+        return task
 
     def test_no_key_when_the_game_is_behind_another_window(self):
         from unittest import mock
@@ -125,6 +131,102 @@ class HoldKeyForegroundTest(unittest.TestCase):
         with mock.patch("win32api.keybd_event") as keybd:
             self.assertTrue(BaseBD2Task.hold_key(task, "d", 0.01))
         self.assertEqual(2, keybd.call_count)
+
+    def test_home_by_key_looks_again_only_after_the_key_was_sent(self):
+        from src.tasks.BaseBD2Task import BaseBD2Task
+
+        task = self.fake_task(foreground=True)
+        task.log_info = lambda *_args, **_kwargs: None
+        sent = []
+        task.tap_key = lambda key, after_sleep=0.0: sent.append(key) or True
+        self.assertTrue(BaseBD2Task.home_by_key(task, lambda seconds: seconds == 10.0, "测试"))
+        self.assertEqual(["H"], sent)
+        task.tap_key = lambda *_args, **_kwargs: False
+        self.assertFalse(
+            BaseBD2Task.home_by_key(task, lambda _s: self.fail("no key, no wait"), "测试")
+        )
+
+    def test_quick_switch_by_key_presses_p_twice_at_most(self):
+        # Leo 2026-10-11 「主頁進卡帶右下角那個P 也是快捷鍵」: P in the field
+        # opens the quick switch.
+        from src.tasks.BaseBD2Task import BaseBD2Task
+
+        task = self.fake_task(foreground=True)
+        task.log_info = lambda *_args, **_kwargs: None
+        diagnostics = []
+        task._save_flow_diagnostic = diagnostics.append
+        sent = []
+        task.tap_key = lambda key, after_sleep=0.0: sent.append(key) or True
+        in_field = lambda: False  # noqa: E731
+        pages = iter((False, True))
+        self.assertTrue(BaseBD2Task._quick_switch_by_key(task, in_field, lambda: next(pages)))
+        self.assertEqual(["P", "P"], sent)
+        self.assertEqual([], diagnostics)
+        sent.clear()
+        self.assertFalse(BaseBD2Task._quick_switch_by_key(task, in_field, lambda: False))
+        self.assertEqual(["P", "P"], sent)
+        self.assertEqual(["cartridge_quick_switch_failed"], diagnostics)
+
+    def test_quick_switch_by_key_never_sends_p_on_home(self):
+        # Live 4K 2026-10-11: P on 主页 opens the 游戏卡珍藏集, which H cannot
+        # leave; F goes back to the recent cartridge (Leo 「f上面是直接返回卡帶」).
+        from src.tasks.BaseBD2Task import BaseBD2Task
+
+        task = self.fake_task(foreground=True)
+        task.log_info = lambda *_args, **_kwargs: None
+        diagnostics = []
+        task._save_flow_diagnostic = diagnostics.append
+        sent = []
+        screen = {"home": True}
+
+        def tap(key, after_sleep=0.0):
+            sent.append(key)
+            if key == "F":
+                screen["home"] = False
+            return True
+
+        task.tap_key = tap
+        self.assertTrue(
+            BaseBD2Task._quick_switch_by_key(task, lambda: screen["home"], lambda: True)
+        )
+        self.assertEqual(["F", "P"], sent)
+        # F did not leave 主页: no P at all.
+        sent.clear()
+        task.tap_key = lambda key, after_sleep=0.0: sent.append(key) or True
+        self.assertFalse(BaseBD2Task._quick_switch_by_key(task, lambda: True, lambda: True))
+        self.assertEqual(["F"], sent)
+        self.assertEqual(["cartridge_quick_switch_failed"], diagnostics)
+
+    def test_doom_book_field_to_home_ends_with_h(self):
+        from unittest import mock
+
+        from src.tasks.DoomBookTask import DoomBookTask
+
+        task = object.__new__(DoomBookTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        task.capture_frame = lambda: None
+        task._dismiss_new_record = lambda _frame: None
+        task._click_reference = lambda *_args, **_kwargs: None
+        task._field_visible = lambda _frame: False
+        task._wait_for_home_confirmation = mock.Mock(return_value=False)
+        task.home_by_key = mock.Mock(return_value=True)
+        self.assertTrue(task._field_to_home())
+        task.home_by_key.assert_called_once()
+
+    def test_shortcut_key_tapped_only_in_front(self):
+        from unittest import mock
+
+        from src.tasks.BaseBD2Task import BaseBD2Task
+
+        task = self.fake_task(foreground=True)
+        with mock.patch("win32api.keybd_event") as keybd:
+            self.assertTrue(BaseBD2Task.tap_key(task, "h"))
+        self.assertEqual([ord("H")] * 2, [call.args[0] for call in keybd.call_args_list])
+        behind = self.fake_task(foreground=False)
+        with mock.patch("win32api.keybd_event") as keybd:
+            self.assertFalse(BaseBD2Task.tap_key(behind, "H"))
+        keybd.assert_not_called()
+        self.assertIn("未发送", behind.info["快捷键"])
 
 
 if __name__ == "__main__":

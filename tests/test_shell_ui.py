@@ -58,16 +58,17 @@ class ConfigFormHintTest(unittest.TestCase):
             self.assertEqual(form._rows[key][0].toolTip(), "")
 
     def test_listed_tasks_keep_only_the_chosen_hints(self):
-        class JunkGearTask:
-            config = {"分解R和SR": True, "分解3星4星角色的UR专用": True}
+        # 爛装's UR setting is gone (Leo 2026-10-11 「只拆 R/SR」): PVP keeps one.
+        class PVPTask:
+            config = {"自动战斗": True, "舞台移动方式": "鼠标"}
             default_config = dict(config)
             config_type = {}
-            config_description = {"分解R和SR": "说明一", "分解3星4星角色的UR专用": "说明二"}
+            config_description = {"自动战斗": "说明一", "舞台移动方式": "说明二"}
 
-        form = config_form.ConfigForm(JunkGearTask())
-        self.assertEqual(form._rows["分解R和SR"][0].toolTip(), "")
-        self.assertEqual(form._rows["分解3星4星角色的UR专用"][0].toolTip(), "说明二")
-        self.assertIn("分解R和SR", JunkGearTask.config)
+        form = config_form.ConfigForm(PVPTask())
+        self.assertEqual(form._rows["自动战斗"][0].toolTip(), "")
+        self.assertEqual(form._rows["舞台移动方式"][0].toolTip(), "说明二")
+        self.assertIn("自动战斗", PVPTask.config)
 
     def test_long_hints_are_broken_into_lines(self):
         text = "字" * 60

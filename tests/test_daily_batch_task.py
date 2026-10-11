@@ -1558,3 +1558,66 @@ class CrashRestartTest(unittest.TestCase):
                 self.assertTrue(DailyBatchTask.run(task))
                 self.open_game.assert_not_called()
                 self.assertEqual(3, len(calls))
+
+
+class JunkAfterGachaFlagTest(unittest.TestCase):
+    """Leo 2026-10-11: 爛装强化分解 right after a finished 免费抽抽乐 looks at
+    the yellow 「!」 items first; otherwise it goes straight to the filter."""
+
+    def _run(self, gacha_on=True, gacha_ok=True):
+        from src.tasks.FreeGachaTask import FreeGachaTask
+        from src.tasks.JunkGearTask import AFTER_GACHA_KEY, JunkGearTask
+
+        seen = []
+
+        class Child:
+            config = {}
+
+            def __init__(self, name, result):
+                self.name = name
+                self.result = result
+
+            def info_clear(self):
+                pass
+
+            def run(self):
+                seen.append((self.name, self.config.get(AFTER_GACHA_KEY)))
+                return self.result
+
+        tasks = {FreeGachaTask: Child("免费抽抽乐", gacha_ok), JunkGearTask: Child("爛装", True)}
+        task = object.__new__(DailyBatchTask)
+        task.child_tasks = (
+            DailyBatchChild("免费抽抽乐", FreeGachaTask),
+            DailyBatchChild("爛装强化分解", JunkGearTask),
+        )
+        task.config = {
+            "启用": True, "免费抽抽乐": gacha_on, "爛装强化分解": True, "失败后继续": True
+        }
+        task.info = {}
+        task.info_set = lambda key, value: None
+        task.log_info = task.log_warning = task.log_error = lambda *a, **k: None
+        task._executor = SimpleNamespace(
+            get_task_by_class=lambda cls: tasks[cls], reset_scene=lambda **k: None
+        )
+        task._auto_login_pending = lambda: False
+        task._continue_after_failure = lambda *_a: True
+        task._game_closed = lambda: False
+        history = mock.Mock()
+        history.is_completed_today.return_value = False
+        schedule = mock.Mock()
+        schedule.is_due.return_value = True
+        with (
+            mock.patch("src.tasks.run_history.default_store", return_value=history),
+            mock.patch("src.tasks.scheduler.default_store", return_value=schedule),
+        ):
+            DailyBatchTask.run(task, RUN_MODE_ALL)
+        return dict(seen)
+
+    def test_right_after_a_finished_gacha(self):
+        self.assertIs(True, self._run()["爛装"])
+
+    def test_gacha_not_ticked(self):
+        self.assertIs(False, self._run(gacha_on=False)["爛装"])
+
+    def test_gacha_failed(self):
+        self.assertIs(False, self._run(gacha_ok=False)["爛装"])

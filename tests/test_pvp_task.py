@@ -604,6 +604,9 @@ class PVPTaskHelperTest(unittest.TestCase):
         ):
             with self.subTest(task=task_class.__name__):
                 task = object.__new__(task_class)
+                # The F / P shortcut fallback is not sent here (game not in front).
+                task.tap_key = lambda *_args, **_kwargs: False
+                task.log_info = lambda *_args, **_kwargs: None
                 calls = []
                 task._sleep_after_recognition = lambda: calls.append("settle")
                 task.info_set = lambda *_args, **_kwargs: None
@@ -637,6 +640,7 @@ class PVPTaskHelperTest(unittest.TestCase):
                         "settle",
                         "entry",
                         "quick",
+                        "home",  # the key fallback looks for 主页 before any key
                     ],
                     calls,
                 )
@@ -700,8 +704,24 @@ class PVPTaskHelperTest(unittest.TestCase):
             )
         )
 
+    def test_pvp_return_home_presses_h_when_nothing_reads(self):
+        # Leo 2026-10-11 「鏡中之戰H 也是回主頁」
+        task = object.__new__(PVPTask)
+        task.config = {"PVP 返回箱庭等待秒数": 1.0, "PVP 返回主页等待秒数": 2.0}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task._wait_for_template = lambda *_args, **_kwargs: False
+        keys = []
+        task.tap_key = lambda key, after_sleep=0.0: keys.append(key) or True
+        task._wait_for_home = lambda timeout, **_kwargs: bool(keys)
+        self.assertTrue(task._return_home_from_pvp_hub())
+        self.assertEqual(["H"], keys)
+
     def test_common_cartridge_entry_stops_when_quick_switch_click_fails(self):
         task = object.__new__(PVPTask)
+        # The F / P shortcut fallback is not sent here (game not in front).
+        task.tap_key = lambda *_args, **_kwargs: False
+        task.log_info = lambda *_args, **_kwargs: None
         task.operate_click = lambda *_args, **_kwargs: None
         task._sleep_after_recognition = lambda: None
         task._recent_cartridge_is_pvp = lambda: True
@@ -734,6 +754,9 @@ class PVPTaskHelperTest(unittest.TestCase):
 
     def test_common_cartridge_entry_rescans_special_pages_after_quick_timeout(self):
         task = object.__new__(PVPTask)
+        # The F / P shortcut fallback is not sent here (game not in front).
+        task.tap_key = lambda *_args, **_kwargs: False
+        task.log_info = lambda *_args, **_kwargs: None
         task.operate_click = lambda *_args, **_kwargs: None
         task._sleep_after_recognition = lambda: None
         task.info_set = lambda *_args, **_kwargs: None
@@ -813,6 +836,9 @@ class PVPTaskHelperTest(unittest.TestCase):
 
     def test_non_pvp_recent_cartridge_rescans_fiend_reward_after_timeout(self):
         task = object.__new__(PVPTask)
+        # The F / P shortcut fallback is not sent here (game not in front).
+        task.tap_key = lambda *_args, **_kwargs: False
+        task.log_info = lambda *_args, **_kwargs: None
         entry_clicks = []
         task.operate_click = lambda *_args, **_kwargs: entry_clicks.append("entry")
         task._sleep_after_recognition = lambda: None
@@ -881,8 +907,11 @@ class PVPTaskHelperTest(unittest.TestCase):
 
     def test_non_pvp_entry_retry_requires_fresh_home_confirmation(self):
         task = object.__new__(PVPTask)
+        # The F / P shortcut fallback is not sent here (game not in front).
+        task.tap_key = lambda *_args, **_kwargs: False
+        task.log_info = lambda *_args, **_kwargs: None
         calls = []
-        home_results = iter((True, False))
+        home_results = iter((True, False, False))  # the last: the key fallback
         task.operate_click = lambda *_args, **_kwargs: calls.append("entry")
         task._sleep_after_recognition = lambda: calls.append("settle")
         task.info_set = lambda *_args, **_kwargs: None

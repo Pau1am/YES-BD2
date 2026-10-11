@@ -191,6 +191,7 @@ config = {
         ["src.tasks.FiendHuntTask", "FiendHuntRecordTask"],
         ["src.tasks.SquareGoddessTask", "SquareGoddessTask"],
         ["src.tasks.MapTradeTask", "MapTradeTask"],
+        ["src.tasks.BargainLoopTask", "BargainLoopTask"],
         ["src.tasks.MapCollectionTask", "MapCollectionTask"],
         ["src.tasks.MapCollectionTask", "MapRouteTestTask"],
         ["src.tasks.FreeGachaTask", "FreeGachaTask"],

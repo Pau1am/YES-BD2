@@ -269,6 +269,49 @@ class FastRecoveryTest(unittest.TestCase):
             reached = recovery.recover_to_home(task)
         return reached, presses
 
+    def test_h_key_once_when_back_presses_do_not_bring_home(self):
+        # Leo 2026-10-11 「在餐廳也可以按H回主頁」: a screen recovery can't read.
+        from src.tasks.map_trade.models import ScreenState
+
+        unknown = np.full((1080, 1920, 3), 120, np.uint8)
+        state = {"frame": unknown}
+        presses, keys = [], []
+
+        class FakeNavigator:
+            def __init__(self, task, vision):
+                self.vision = SimpleNamespace(capture=lambda: state["frame"])
+
+            def _home_confirmation_signals(self, frame):
+                return (frame is HOME, 0, 0.0, "")
+
+            def classify(self):
+                return ScreenState.UNKNOWN
+
+            def clear_home_announcement(self, _frame, _clicks=0):
+                return False
+
+        def tap_key(key, after_sleep=0.0):
+            keys.append(key)
+            state["frame"] = HOME
+            return True
+
+        task = SimpleNamespace(
+            info_set=lambda *a: None,
+            log_info=lambda *a, **k: None,
+            sleep=lambda *_a: None,
+            operate_click=lambda *_a, **_k: presses.append(1),
+            tap_key=tap_key,
+        )
+        with (
+            mock.patch.object(recovery, "Navigator", FakeNavigator),
+            mock.patch.object(recovery, "Vision", lambda task: None),
+            mock.patch.object(recovery, "_handle_dialog", lambda *_a: "none"),
+            mock.patch.object(recovery, "monotonic", iter(range(0, 1000)).__next__),
+        ):
+            self.assertTrue(recovery.recover_to_home(task))
+        self.assertEqual(1, len(presses))  # the back arrow first
+        self.assertEqual(["H"], keys)
+
     def test_black_loading_screen_is_waited_out_not_pressed(self):
         # Live 2K 2026-09-29: back pressed 4 times into the event->home loading.
         black = np.zeros((1080, 1920, 3), np.uint8)

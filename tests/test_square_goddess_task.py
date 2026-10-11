@@ -461,6 +461,22 @@ class SquareGoddessEntryTest(unittest.TestCase):
             notifications,
         )
 
+    def test_failed_wish_still_leaves_the_square(self):
+        # Leo 2026-10-11 「哪怕我有沒有點到女神像 我都是要離開廣場進行下一步的」
+        task = object.__new__(SquareGoddessTask)
+        task.config = {"启用": True}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task._status_set = lambda *_args: None
+        stages = []
+        task._enter_square_from_home = lambda: stages.append("enter") or True
+        task._pray_at_goddess = lambda: stages.append("pray") or False
+        task._return_home_from_square = lambda: stages.append("home") or True
+        task._record_wish = lambda: self.fail("no wish recorded")
+
+        self.assertFalse(SquareGoddessTask.run(task))
+        self.assertEqual(["enter", "pray", "home"], stages)
+
     def test_square_return_home_uses_relative_home_point_and_restores_timeout(self):
         task = object.__new__(SquareGoddessTask)
         task.config = {
@@ -546,7 +562,10 @@ class SquareGoddessEntryTest(unittest.TestCase):
         self.assertEqual("2/3", statuses["广场主页点击次数"])
         self.assertTrue(any("执行第2次点击" in message for message in logs))
 
-    def test_square_return_home_does_not_retry_without_quick_switch_signal(self):
+    def test_square_return_home_presses_h_without_quick_switch_signal(self):
+        # Leo 2026-10-11 「不可以說認不到辨識不到就卡住 你可以用快捷鍵」: with
+        # neither home nor the square's button read, the game's H key (no click
+        # that could land on home's menu icon).
         task = object.__new__(SquareGoddessTask)
         task.config = {"主页压暗阈值": 185.0}
         task.info_set = lambda *_args, **_kwargs: None
@@ -573,6 +592,8 @@ class SquareGoddessEntryTest(unittest.TestCase):
         task._passes = lambda *_args, **_kwargs: False
         clicks = []
         task.operate_click = lambda *args, **kwargs: clicks.append((args, kwargs))
+        keys = []
+        task.tap_key = lambda key, **kwargs: keys.append((key, kwargs)) or True
         clock = {"value": 0.0}
 
         def advance_clock():
@@ -594,6 +615,7 @@ class SquareGoddessEntryTest(unittest.TestCase):
             )
 
         self.assertEqual([], clicks)
+        self.assertEqual([("H", {"after_sleep": 1.0})] * 2, keys)
 
     def test_square_return_home_stops_after_retry_budget_is_exhausted(self):
         task = object.__new__(SquareGoddessTask)

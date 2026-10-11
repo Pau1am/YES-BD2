@@ -97,6 +97,15 @@ class HomeGuardTest(unittest.TestCase):
                 self.assertTrue(getattr(cls.run, "_bd2_home_guard", False))
 
 
+    def test_trade_goes_home_first(self):
+        # Live 4K 2026-10-11: 跑商 started on the Loyal Maid event page lost
+        # 买 and 料理; the opt-in list above only checked recovery after a
+        # failure, not the way home before the run.
+        from src.tasks.MapTradeTask import MapTradeTask
+
+        self.assertTrue(MapTradeTask.start_from_home)
+
+
 class StepInAfterPauseTest(unittest.TestCase):
     """decision 8 of the 10-10 plan, its default: a click on the paused game does not stop the run;
     after 继续 it looks at the screen again before its next press."""

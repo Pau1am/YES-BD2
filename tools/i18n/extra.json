@@ -49,10 +49,10 @@
   "ja": "ギルド、マイハウス、酒場",
   "ko": "길드, 마이홈, 주점"
  },
- "只处理带黄色!新获得标记的装备：R/SR 与 3★/4★ 角色的 UR 专用装备强化到 +7 并自动分解；5★ 角色 UR 专用、上锁、穿戴中、已强化的一律保留。": {
-  "en": "Only handles Gear with the yellow ! new mark: R/SR and UR Exclusive Gear of 3★/4★ Characters are upgraded to +7 and dismantled automatically; 5★ Characters' UR Exclusive Gear and locked, equipped or already upgraded Gear are always kept.",
-  "ja": "黄色の「!」新規マークが付いた装備だけを処理：R/SR と 3★/4★ キャラクターの UR 専用装備を +7 まで強化して自動分解。5★ キャラクターの UR 専用装備、ロック中・装備中・強化済みの装備はすべて残す。",
-  "ko": "노란색 ! 신규 표시가 있는 장비만 처리: R/SR과 3★/4★ 캐릭터의 UR 전용 장비는 +7까지 강화해 자동 분해. 5★ 캐릭터의 UR 전용 장비와 잠금·착용 중·강화된 장비는 모두 보관."
+ "一键日常里紧接免费抽抽乐时，先只处理带黄色!的新装备，不动背包筛选和排序；没有拆到时，背包先筛选出 R、再筛选出 SR（按获得时间排序），看最前面几件：强化到 +7 并自动分解；SR 会点开核对，只拆 3★/4★ 角色专用的（5★ 角色的可在设定里选）；上锁、穿戴中、已强化的一律保留，UR 不碰。背包筛选和排序会改回原样。没有可分解的爛装时，做一件 N 装备强化后分解（每日任务）。": {
+  "en": "Right after the free Gacha in Daily One-Click, it first handles only the new Gear with the yellow !, leaving the bag filter and sort as they are. If none is dismantled, it filters the bag to R, then SR (sorted by time acquired), and checks the Gear at the front: it is upgraded to +7 and dismantled automatically. SR is opened and checked first, and only 3★/4★ Characters' Exclusive Gear is dismantled (5★ Characters' can be chosen in the settings); locked, equipped or already upgraded Gear is always kept, and UR is never touched. The bag filter and sort are put back afterwards. With nothing to dismantle, one N Gear is crafted, upgraded and dismantled (daily mission).",
+  "ja": "デイリー一括で無料ガチャの直後は、まず黄色い ! の付いた新しい装備だけを処理し、バッグの絞り込みと並び順はそのまま。分解できなかったときは、バッグを R、次に SR で絞り込み（獲得順）、先頭の装備を処理：+7 まで強化して自動分解。SR は開いて確認し、3★/4★ キャラクターの専用装備だけ分解する（5★ キャラクターの分は設定で選べる）。ロック中・装備中・強化済みの装備はすべて残し、UR には触れない。バッグの絞り込みと並び順は元に戻す。分解できる装備がないときは N 装備を1つ製作し、強化して分解（デイリーミッション）。",
+  "ko": "일일 원클릭에서 무료 뽑기 바로 다음에는 먼저 노란 ! 표시가 있는 새 장비만 처리하고, 가방 필터와 정렬은 그대로 둠. 분해하지 못했으면 가방을 R, 이어서 SR로 필터(획득 순)하고 맨 앞 장비를 처리: +7까지 강화해 자동 분해. SR은 열어서 확인하고 3★/4★ 캐릭터 전용 장비만 분해(5★ 캐릭터 것은 설정에서 선택). 잠금·착용 중·강화된 장비는 모두 보관하고, UR은 건드리지 않음. 가방 필터와 정렬은 원래대로 되돌림. 분해할 장비가 없으면 N 장비 1개를 제작해 강화 후 분해(일일 임무)."
  },
  "执行公会签到、小屋签到和酒馆一键收菜。": {
   "en": "Does the Guild Check-in, House Check-in and Tavern Collect All.",

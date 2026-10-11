@@ -4588,6 +4588,35 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
         )
         self.assertGreaterEqual(len(matched_specs), len(CHAPTER_HOME_TEMPLATES))
 
+    def test_return_home_from_sandbox_presses_h_when_the_click_did_not_reach_home(self):
+        # Leo 2026-10-11 「凡事總要有備用方案 不要失敗就卡死」
+        keys = []
+        task = SimpleNamespace(
+            config={},
+            operate_click=lambda *_args, **_kwargs: None,
+            sleep=lambda *_args: None,
+            log_info=lambda *_args, **_kwargs: None,
+            home_by_key=lambda wait_home, label: keys.append(label) or wait_home(10.0),
+        )
+        vision = SimpleNamespace(
+            capture=lambda: np.zeros((1080, 1920, 3), dtype=np.uint8),
+            match=lambda *_args: MatchResult(-1.0, (0, 0), (0, 0)),
+            passes=lambda *_args: False,
+        )
+        navigator = Navigator(task, vision)
+        navigator.ensure_small_minimap = lambda: True
+        navigator.classify = lambda: ScreenState.SANDBOX
+        waits = []
+        navigator._wait_for_cartridge_home = lambda timeout, **_kwargs: (
+            waits.append(timeout) or len(waits) == 2
+        )
+
+        result = navigator._return_home_pass()
+
+        self.assertTrue(result.success)
+        self.assertEqual(["箱庭返回主页"], keys)
+        self.assertEqual([RETURN_HOME_TIMEOUT, 10.0], waits)
+
     def test_return_home_closes_each_confirmed_map_page_before_home(self):
         cases = (
             (

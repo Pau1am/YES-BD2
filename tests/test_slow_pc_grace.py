@@ -36,7 +36,11 @@ class Clock:
 
 
 def gear(equipped=False, locked=False):
-    return GearItem(name="破旧短剑", rarity="R", equipped=equipped, locked=locked, enhanced=False)
+    # A dismantlable SR is a 3★/4★ exclusive (猎人之弓, 3★ 莉兹内).
+    return GearItem(
+        name="猎人之弓", rarity="SR", equipped=equipped, locked=locked, enhanced=False,
+        owner_line="☆莉兹内",
+    )
 
 
 class JunkDetailTest(unittest.TestCase):
@@ -54,7 +58,10 @@ class JunkDetailTest(unittest.TestCase):
         task.clock = Clock()
         task.sleep = task.clock.sleep
         task._click_reference = lambda *a, **k: None
-        task._grid_rarity = lambda frame, cell: None  # unsure on the grid: opened
+        # The SR filter shows an unlocked, unworn SR item: it is opened.
+        task._grid_rarity = lambda frame, cell: "SR"
+        task._badged_cells = lambda: set()
+        task._older_cell_kept = lambda *_a: ""
         task._wait_detail = lambda open_, timeout=0: True
         task.press_and_confirm = lambda label, do, confirmed, **k: do() or True
         reads = iter(reads)
@@ -62,19 +69,21 @@ class JunkDetailTest(unittest.TestCase):
 
         def read():
             task.reads += 1
-            return next(reads), "详情"
+            return next(reads), "专用装备"
 
         task._read_detail = read
         return task
 
     def _classify(self, task):
         with mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=False):
-            return task._classify_cells([(0, 0)], {}, np.zeros((1080, 1920, 3)))
+            return task._classify_cells(
+                [(0, 0)], {"猎人之弓": 3}, np.zeros((1080, 1920, 3)), grade="SR"
+            )
 
     def test_equipped_tag_drawn_late_keeps_the_item(self):
         task = self._task([gear(), gear(equipped=True)])
         self.assertEqual([], self._classify(task))
-        self.assertIn("穿戴中", task.info["新装备识别"])
+        self.assertIn("穿戴中", task.info["SR 识别"])
 
     def test_lock_drawn_late_keeps_the_item(self):
         task = self._task([gear(), gear(locked=True)])
@@ -91,23 +100,12 @@ class JunkDetailTest(unittest.TestCase):
         self.assertEqual([], task.clock.sleeps)
 
 
-class JunkBadgesTest(unittest.TestCase):
-    """爛装: "!" badges drawn late; opening the bag clears them for good."""
+class JunkFilteredGridTest(unittest.TestCase):
+    """爛装: the filtered grid drawn late must not count as an empty bag."""
 
-    def test_badges_drawn_after_two_looks_are_handled(self):
-        import tempfile
-        from pathlib import Path
-
+    def test_items_drawn_after_an_empty_look_are_judged(self):
         from src.tasks.JunkGearTask import JunkGearTask
 
-        folder = tempfile.TemporaryDirectory()
-        self.addCleanup(folder.cleanup)
-        pending = mock.patch(
-            "src.tasks.JunkGearTask._pending_file",
-            return_value=Path(folder.name) / "junk_gear_pending.json",
-        )
-        pending.start()
-        self.addCleanup(pending.stop)
         task = object.__new__(JunkGearTask)
         task.config = {}
         task.info_set = lambda *a: None
@@ -115,29 +113,27 @@ class JunkBadgesTest(unittest.TestCase):
         task.log_warning = lambda *a, **k: None
         task.sleep = lambda *a: None
         frame = np.zeros((1080, 1920, 3), np.uint8)
-        task._colours_distorted = lambda: False
-        task._open_equipment_bag = lambda: True
-        task._saved_sort = lambda: None
-        task._clear_saved_sort = lambda: None
-        task._switch_to_newest_first = lambda: "按获得时间从晚到早排序"
-        task._restore_sort = lambda _sort: True
-        task._restore_bag_detail_view = lambda: None
         task._still_grid_frame = lambda: frame
-        task._claim_fail = lambda _stage: False
-        task._leave_to_home = lambda *_a: True
-        task._pending_cells = lambda _frame: []
+        task._save_filter = lambda _state: None
+        task._set_bag_filter = lambda _wanted: True
         judged = []
-        task._classify_cells = lambda cells, _stars, _frame: judged.append(list(cells))
-        looks = iter([[], [], [(0, 0)]])
+        task._classify_cells = lambda cells, _stars, _frame, grade="R": judged.append(
+            (grade, list(cells))
+        ) or []
+        # R: an empty look, then the item; SR: empty for good.
+        looks = iter([[], [(0, 0)]])
         with (
-            mock.patch("src.tasks.JunkGearTask.load_exclusive_stars", return_value={}),
             mock.patch(
-                "src.tasks.JunkGearTask.leading_new_cells",
-                side_effect=lambda *a: next(looks, [(0, 0)]),
+                "src.tasks.JunkGearTask.occupied_cells",
+                side_effect=lambda *a: next(looks, []),
             ),
+            # The grace ends at once for SR (wait_for still reads at least twice).
+            mock.patch("src.tasks.JunkGearTask.SLOW_PC_GRACE_SECONDS", 0),
         ):
-            task.run_claim()
-        self.assertEqual([[(0, 0)]], judged)
+            ok, _stage, dismantled = task._dismantle_filtered({}, {"grade": None}, False)
+        self.assertTrue(ok)
+        self.assertFalse(dismantled)
+        self.assertEqual([("R", [(0, 0)])], judged)
 
 
 class FreeGachaGraceTest(unittest.TestCase):

@@ -3,7 +3,7 @@
     # The version our patched launcher reports. Installed launchers replace
     # themselves only with a higher one (ok's update_pyappify), so bump this
     # whenever the launcher patches below change.
-    [string]$LauncherVersion = "1.2.6",
+    [string]$LauncherVersion = "1.2.7",
     [string]$BuildDir = "pyappify_build",
     [ValidateSet("zlib", "lzma")]
     [string]$NsisCompression = "lzma",
@@ -386,12 +386,24 @@ $appService = Replace-Once $appService `
 # saw the folder, only fetched, and copied the missing files on to pip. Setup
 # now checks the files against the checked-out version and clones again when
 # any are missing; if that still fails it says what the player can do.
+# A failed download said only 「Failed to fetch updates for …\repo」 (player
+# report 2026-10-11) and hid the reason; it now says GitHub could not be
+# reached, what to do, and the underlying git error.
 $appService = Replace-Once $appService `
     (@'
 #[tauri::command]
 pub async fn setup_app(app_name: &str, profile_name: &str) -> Result<(), Error> {
 '@ -replace "`r`n", "`n") `
     (@'
+async fn ensure_repository_for_setup(app: &App) -> Result<(), Error> {
+    ensure_repository(app).await.map_err(|e| {
+        err!(
+            "下载失败，多半是连不上 GitHub：请先开加速器或换个网络，再按一次安装。Download failed, most likely GitHub cannot be reached: turn on an accelerator or try another network, then press install again. ({:#})",
+            e
+        )
+    })
+}
+
 fn repo_checkout_complete(repo_path: &Path) -> bool {
     let Ok(repo) = git2::Repository::open(repo_path) else {
         return false;
@@ -419,7 +431,7 @@ $appService = Replace-Once $appService `
     let working_dir_path = get_app_working_dir_path(app_name);
 '@ -replace "`r`n", "`n") `
     (@'
-    ensure_repository(&app).await?;
+    ensure_repository_for_setup(&app).await?;
     if !repo_checkout_complete(&repo_path) {
         warn!(
             "Repository for '{}' at {} is missing files (an earlier download stopped halfway). Downloading it again.",
@@ -431,7 +443,7 @@ $appService = Replace-Once $appService `
             "The last download did not finish; downloading again."
         );
         delete_dir_if_exist(&repo_path).await?;
-        ensure_repository(&app).await?;
+        ensure_repository_for_setup(&app).await?;
         if !repo_checkout_complete(&repo_path) {
             return Err(err!(
                 "下载不完整：请确认能连上 GitHub（可以先开加速器），再按一次安装。The download is incomplete: make sure GitHub can be reached, then press install again."

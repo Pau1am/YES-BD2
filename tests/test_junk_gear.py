@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -25,6 +26,28 @@ def label(hues):
         hsv[:, index * 40 // len(hues) : (index + 1) * 40 // len(hues), 0] = hue
     return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
+
+
+def _blank():
+    return np.zeros((1080, 1920, 3), np.uint8)
+
+
+def _grid_passes(task, rarity="R"):
+    """The grid shows an unlocked, unworn, unenhanced item of ``rarity``."""
+    task._badged_cells = lambda: set()
+    task._older_cell_kept = lambda *_a: ""
+    task._grid_rarity = lambda _frame, _cell: rarity
+
+
+def _filter_stubs(task, original=None):
+    """The bag filter reads ``original`` and every change works."""
+    state = original or {"grade": None, "worn": True}
+    task._saved_filter = lambda: None
+    task._save_filter = lambda _state: None
+    task._clear_saved_filter = lambda: None
+    task._read_bag_filter = lambda: dict(state)
+    task.filter_sets = []
+    task._set_bag_filter = lambda wanted: task.filter_sets.append(dict(wanted)) or True
 
 class JunkRulesTest(unittest.TestCase):
     STARS = {"掠夺之手": 4, "卢戈制衬衫": 3, "噬血者": 5, "恋的头饰": 5}
@@ -192,11 +215,15 @@ class JunkSafetyTest(unittest.TestCase):
     def test_a_stale_popup_keeps_every_item(self):
         # The detail popup never closes: nothing is judged, and the run is a
         # failure (None), not "no junk".
+        from unittest import mock
+
         task = self._task()
         clicks = []
         task._click_reference = lambda x, y, after_sleep=0: clicks.append((x, y))
         task._wait_detail = lambda open_, timeout=0: open_
-        self.assertIsNone(task._classify_cells([(0, 0), (0, 1)], {}))
+        _grid_passes(task, rarity="SR")
+        with mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=False):
+            self.assertIsNone(task._classify_cells([(0, 0), (0, 1)], {}, _blank(), grade="SR"))
         self.assertEqual([], clicks)
 
     def test_selection_is_cancelled_when_cells_moved(self):
@@ -204,13 +231,22 @@ class JunkSafetyTest(unittest.TestCase):
 
         task = self._task()
         clicks = []
-        task._click_reference = lambda x, y, after_sleep=0: clicks.append((x, y))
-        task._selection_count = lambda: 0
+        selection = {"on": False}
+
+        def click(x, y, after_sleep=0):
+            clicks.append((x, y))
+            selection["on"] = (x, y) == module.ONE_CLICK_ENHANCE_POINT
+
+        task._click_reference = click
+        task._selection_count = lambda: 0 if selection["on"] else None
+        task._bottom_right_text = lambda: "取消" if selection["on"] else "一键分解"
         rng = np.random.default_rng(3)
         classified = rng.integers(0, 255, (1080, 1920, 3), dtype=np.uint8)
         moved = rng.integers(0, 255, (1080, 1920, 3), dtype=np.uint8)
         task.capture_frame = lambda: moved
-        self.assertFalse(task._enhance_and_dismantle([(0, 0)], classified))
+        # Cancelled and back on the bag: this batch is not dismantled (None),
+        # the run goes on (Leo 2026-10-11 「又整個失敗吧」).
+        self.assertIsNone(task._enhance_and_dismantle([(0, 0)], classified))
         # Only 一键强化 and 取消: no cell was selected.
         self.assertEqual(
             [module.ONE_CLICK_ENHANCE_POINT, module.SELECTION_CANCEL_POINT], clicks
@@ -239,6 +275,7 @@ class JunkSafetyTest(unittest.TestCase):
 
         task = self._task()
         task._open_equipment_bag = lambda: True
+        _filter_stubs(task)
         task._saved_sort = lambda: "按星级从高到低排序"
         task._restore_sort = lambda original: False
         task._switch_to_newest_first = mock.Mock()
@@ -263,6 +300,7 @@ class JunkSafetyTest(unittest.TestCase):
 
         task = self._task()
         task._open_equipment_bag = lambda: True
+        _filter_stubs(task)
         task._saved_sort = lambda: None
         task._clear_saved_sort = mock.Mock()
         task._switch_to_newest_first = lambda: "按星级从高到低排序"
@@ -277,6 +315,195 @@ class JunkSafetyTest(unittest.TestCase):
                 task.run_claim()
         # The sort is restored on the next run from the saved file instead.
         task._restore_sort.assert_not_called()
+
+
+class SelectionRetryTest(unittest.TestCase):
+    """Leo 2026-10-11 「你不會又點一次沒點到 或者 沒辨識到 又整個失敗吧」: a
+    pick tap that did not take is cancelled and picked again once; a second
+    miss leaves this batch, and the run goes on.  Only the planned cells are
+    ever tapped."""
+
+    CELLS = [(0, 0), (0, 1)]
+
+    def _task(self, cell_misses=0, enter_misses=0, cancel_works=True, counter_reads=True):
+        from unittest import mock
+
+        from src.tasks import JunkGearTask as module
+
+        clock = [0.0]
+        for target, value in (
+            ("monotonic", lambda: clock[0]),
+            ("SLOW_PC_GRACE_SECONDS", 0),
+        ):
+            patcher = mock.patch(f"src.tasks.JunkGearTask.{target}", value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        task = JunkSafetyTest._task()
+        task.sleep = lambda seconds: clock.__setitem__(0, clock[0] + seconds)
+        frame = np.random.default_rng(5).integers(0, 255, (1080, 1920, 3), dtype=np.uint8)
+        task.classified = frame
+        task.capture_frame = lambda: frame
+        screen = {"selection": False, "count": 0}
+        misses = {"cell": cell_misses, "enter": enter_misses}
+        task.clicks = []
+        cell_points = {(module.GRID_COLUMNS[c], module.GRID_ROWS[r]) for r, c in self.CELLS}
+
+        def click(x, y, after_sleep=0):
+            task.clicks.append((x, y))
+            clock[0] += after_sleep
+            if (x, y) == module.ONE_CLICK_ENHANCE_POINT:
+                if misses["enter"]:
+                    misses["enter"] -= 1
+                else:
+                    screen.update(selection=True, count=0)
+            elif (x, y) == module.SELECTION_CANCEL_POINT:
+                screen["selection"] = not cancel_works
+            elif (x, y) in cell_points:
+                if misses["cell"]:
+                    misses["cell"] -= 1
+                else:
+                    screen["count"] += 1
+
+        task._click_reference = click
+        task._selection_count = lambda: (
+            screen["count"] if screen["selection"] and counter_reads else None
+        )
+        task._bottom_right_text = lambda: "取消" if screen["selection"] else "一键分解"
+        task._prepare_enhance_dialog = lambda planned: True
+        task._enhance_start_box = lambda: "开始强化"
+        task.started = []
+        task._click_reference_box = lambda box, after_sleep=0: task.started.append(box)
+        task._settle_enhance_result = lambda planned: True
+        task.cell_points = cell_points
+        return task, module
+
+    def test_a_missed_pick_is_picked_again(self):
+        task, module = self._task(cell_misses=1)
+        self.assertTrue(task._enhance_and_dismantle(self.CELLS, task.classified))
+        self.assertEqual(1, task.clicks.count(module.SELECTION_CANCEL_POINT))
+        self.assertEqual(["开始强化"], task.started)
+
+    def test_two_wrong_counts_leave_this_batch(self):
+        task, module = self._task(cell_misses=99)
+        self.assertIsNone(task._enhance_and_dismantle(self.CELLS, task.classified))
+        self.assertEqual(2, task.clicks.count(module.SELECTION_CANCEL_POINT))
+        self.assertEqual([], task.started)
+        self.assertNotIn(module.SELECTION_CONFIRM_POINT, task.clicks)
+
+    def test_only_planned_cells_are_tapped(self):
+        task, module = self._task(cell_misses=99)
+        task._enhance_and_dismantle(self.CELLS, task.classified)
+        others = {
+            module.ONE_CLICK_ENHANCE_POINT,
+            module.SELECTION_CANCEL_POINT,
+        }
+        self.assertTrue(all(c in task.cell_points or c in others for c in task.clicks))
+
+    def test_a_missed_enhance_tap_is_tapped_once_more(self):
+        task, module = self._task(enter_misses=1)
+        self.assertTrue(task._enhance_and_dismantle(self.CELLS, task.classified))
+        self.assertEqual(2, task.clicks.count(module.ONE_CLICK_ENHANCE_POINT))
+
+    def test_enhance_tap_dead_twice_leaves_this_batch(self):
+        task, module = self._task(enter_misses=99)
+        self.assertIsNone(task._enhance_and_dismantle(self.CELLS, task.classified))
+        self.assertEqual([module.ONE_CLICK_ENHANCE_POINT] * 2, task.clicks)
+
+    def test_a_cancel_that_does_not_leave_selection_is_a_failure(self):
+        task, _module = self._task(cell_misses=99, cancel_works=False)
+        self.assertIs(False, task._enhance_and_dismantle(self.CELLS, task.classified))
+
+    def test_an_unread_counter_picks_nothing_and_goes_on(self):
+        # Selection mode opened (取消 where 一键分解 was) but N/2000 reads
+        # nothing: no cell is tapped, 取消 goes back to the bag.
+        task, module = self._task(counter_reads=False)
+        self.assertIsNone(task._enhance_and_dismantle(self.CELLS, task.classified))
+        self.assertEqual(
+            [module.ONE_CLICK_ENHANCE_POINT, module.SELECTION_CANCEL_POINT], task.clicks
+        )
+
+    def test_cancel_is_never_tapped_while_the_bag_shows_dismantle(self):
+        # On the bag the 取消 spot is 一键分解.
+        task, module = self._task()
+        self.assertTrue(task._cancel_selection())
+        self.assertEqual([], task.clicks)
+
+    def test_a_wrong_enhance_dialog_cancels_and_goes_on(self):
+        task, module = self._task()
+        task._prepare_enhance_dialog = lambda planned: False
+        self.assertIsNone(task._enhance_and_dismantle(self.CELLS, task.classified))
+        self.assertIn(module.ENHANCE_CANCEL_POINT, task.clicks)
+        self.assertEqual([], task.started)
+
+
+try:
+    from onnxocr.onnx_paddleocr import ONNXPaddleOcr
+except ImportError:  # pragma: no cover - the tool always ships onnxocr
+    ONNXPaddleOcr = None
+
+
+class BagButtonsReadTest(unittest.TestCase):
+    """The 取消 spot of selection mode is 一键分解 on the bag, so the tool
+    must read 一键分解 there.  Frame: Leo's 4K bag after the 10-11 real run."""
+
+    @unittest.skipIf(ONNXPaddleOcr is None, "onnxocr not installed")
+    def test_the_dismantle_button_reads_where_cancel_would_be(self):
+        from src.tasks.JunkGearTask import BOTTOM_RIGHT_BUTTON_ROI
+
+        folder = Path(__file__).parent / "fixtures" / "junk_gear"
+        crop = cv2.imread(str(folder / "bag_bottom_buttons_leo_4k_at_1080.jpg"))
+        frame = np.zeros((1080, 1920, 3), np.uint8)
+        frame[950 : 950 + crop.shape[0], 1150 : 1150 + crop.shape[1]] = crop
+        x, y, w, h = BOTTOM_RIGHT_BUTTON_ROI
+        engine = ONNXPaddleOcr(use_angle_cls=False, use_openvino=True)
+        text = "".join(t for _b, (t, _s) in engine.ocr(frame[y : y + h, x : x + w])[0] or [])
+        self.assertIn("分解", text)
+
+
+class EnhanceResultTest(unittest.TestCase):
+    """The result overlay closes on a tap on blank space; an unread result
+    gets that tap once (Leo 10-11 fixed-position last resort)."""
+
+    def _task(self, results, bag_after_tap=True):
+        from unittest import mock
+
+        from src.tasks import JunkGearTask as module
+
+        clock = [0.0]
+        patcher = mock.patch("src.tasks.JunkGearTask.monotonic", lambda: clock[0])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        task = JunkSafetyTest._task()
+        task.sleep = lambda seconds: clock.__setitem__(0, clock[0] + seconds)
+        task.capture_frame = lambda: None
+        texts = iter(results)
+        task._roi_boxes = lambda _f, _roi, _name: [SimpleNamespace(name=next(texts, ""))]
+        task.clicks = []
+        screen = {"bag": False}
+
+        def click(x, y, after_sleep=0):
+            task.clicks.append((x, y))
+            clock[0] += after_sleep
+            screen["bag"] = bag_after_tap
+
+        task._click_reference = click
+        task._title_visible = lambda *_a: screen["bag"]
+        return task, module
+
+    def test_a_read_result_is_closed_and_counted(self):
+        task, module = self._task(["强化结果 已分解共2个装备"])
+        self.assertTrue(task._settle_enhance_result(2))
+        self.assertEqual([module.NEUTRAL_TAP_POINT], task.clicks)
+
+    def test_an_unread_result_gets_one_blank_tap(self):
+        task, module = self._task([])
+        self.assertTrue(task._settle_enhance_result(2))
+        self.assertEqual([module.NEUTRAL_TAP_POINT], task.clicks)
+
+    def test_no_bag_after_the_tap_is_a_failure(self):
+        task, module = self._task([], bag_after_tap=False)
+        self.assertFalse(task._settle_enhance_result(2))
+        self.assertEqual([module.NEUTRAL_TAP_POINT], task.clicks)
 
 
 class TitleParsingTest(unittest.TestCase):
@@ -365,28 +592,68 @@ class GridShortcutTest(unittest.TestCase):
             self.assertEqual([], task._classify_cells([(0, 0)], {}, np.zeros((1080, 1920, 3))))
         self.assertEqual([], task.clicks)
 
-    def test_grid_sr_is_junk_without_opening_it(self):
+    def test_a_cell_of_another_grade_is_never_opened(self):
+        # The filter shows one grade; a label read as anything else (UR, or
+        # unread) is kept unopened (Leo 2026-10-11 「只拆 R/SR」).
+        from unittest import mock
+
+        for read in ("UR", "R", None):
+            task = self._task()
+            _grid_passes(task, rarity=read)
+            with mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=False):
+                self.assertEqual([], task._classify_cells([(0, 0)], {}, _blank(), grade="SR"))
+            self.assertEqual([], task.clicks)
+
+    def test_a_grid_sr_is_opened_before_it_counts(self):
+        # SR comes as 5★ exclusives too (翼角头盔 SR, Leo's bag 2026-10-11).
         from unittest import mock
 
         task = self._task()
-        task._grid_rarity = lambda frame, cell: "SR"
-        with mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=False):
-            junk = task._classify_cells([(0, 0)], {}, np.zeros((1080, 1920, 3)))
-        self.assertEqual([(0, 0)], junk)
-        self.assertEqual([], task.clicks)
-
-    def test_ur_or_unsure_is_opened_as_before(self):
-        from unittest import mock
-
-        task = self._task()
-        task._grid_rarity = lambda frame, cell: None
+        _grid_passes(task, rarity="SR")
         task._wait_detail = lambda open_, timeout=0: open_ is False or True
         opened = []
         task._read_detail = lambda: opened.append(1) or (None, "")
         task.sleep = lambda *a: None
         with mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=False):
-            task._classify_cells([(0, 0)], {}, np.zeros((1080, 1920, 3)))
+            task._classify_cells([(0, 0)], {}, _blank(), grade="SR")
         self.assertTrue(opened)
+
+    def test_the_5_star_sr_setting_reaches_the_rule(self):
+        from unittest import mock
+
+        from src.tasks.JunkGearTask import FIVE_STAR_SR_KEY
+        from src.utils.junk_gear import GearItem
+
+        task = self._task()
+        for setting in (False, True):
+            task.config = {FIVE_STAR_SR_KEY: setting}
+            _grid_passes(task, rarity="SR")
+            task._wait_detail = lambda *a, **k: True
+            item = GearItem("翼角头盔", "SR", False, False, False, owner_line="格兰希特")
+            task._read_detail = lambda: (item, "专用装备")
+            task.sleep = lambda *a: None
+            task.press_and_confirm = lambda *a, **k: mock.Mock(confirmed=True)
+            seen = []
+            with (
+                mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=False),
+                mock.patch(
+                    "src.tasks.JunkGearTask.classify_low_grade",
+                    side_effect=lambda *a, **k: seen.append(k["five_star_sr"]) or (False, "x"),
+                ),
+            ):
+                task._classify_cells([(0, 0)], {}, _blank(), grade="SR")
+            self.assertEqual([setting], seen)
+
+    def test_a_grid_r_is_junk_without_opening_it(self):
+        # Leo 2026-10-11 「r不點開」.
+        from unittest import mock
+
+        task = self._task()
+        _grid_passes(task, rarity="R")
+        task._wait_detail = lambda *a, **k: self.fail("detail opened")
+        with mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=False):
+            self.assertEqual([(0, 0)], task._classify_cells([(0, 0)], {}, _blank(), grade="R"))
+        self.assertEqual([], task.clicks)
 
 
 class NewBadgeLabelTest(unittest.TestCase):
@@ -520,99 +787,22 @@ class LoneDigitsTest(unittest.TestCase):
         self.assertEqual("abcd", lone_digits("abcd"))
 
 
-class PendingDateTest(unittest.TestCase):
-    """Review #26: re-saving the same leftover junk keeps its first date."""
+class PendingListGoneTest(unittest.TestCase):
+    """The "!" version carried junk in a file; a filtered bag shows the same
+    junk next run, so the old file is only removed."""
 
-    def setUp(self):
+    def test_the_old_list_is_removed(self):
         import tempfile
-        from unittest import mock
-
-        folder = tempfile.TemporaryDirectory()
-        self.addCleanup(folder.cleanup)
-        self.path = Path(folder.name) / "junk_gear_pending.json"
-        patcher = mock.patch("src.tasks.JunkGearTask._pending_file", return_value=self.path)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def _task(self):
-        from types import SimpleNamespace
         from unittest import mock
 
         from src.tasks.JunkGearTask import JunkGearTask
 
-        task = object.__new__(JunkGearTask)
-        task.config = {}
-        task.info_set = lambda *a: None
-        task.log_info = lambda *a, **k: None
-        task.log_warning = lambda *a, **k: None
-        task.sleep = lambda *a: None
-        frame = np.zeros((1080, 1920, 3), np.uint8)
-        task._colours_distorted = lambda: False
-        task._open_equipment_bag = lambda: True
-        task._saved_sort = lambda: None
-        task._clear_saved_sort = lambda: None
-        task._switch_to_newest_first = lambda: "按获得时间从晚到早排序"
-        task._restore_sort = lambda _sort: True
-        task._restore_bag_detail_view = lambda: None
-        task._still_grid_frame = lambda: frame
-        task._claim_fail = lambda _stage: False
-        task._enhance_and_dismantle = lambda cells, _frame: False
-        task.load = mock.patch("src.tasks.JunkGearTask.load_exclusive_stars", return_value={})
-        task.new = mock.patch("src.tasks.JunkGearTask.leading_new_cells", return_value=[(0, 0)])
-        task.load.start()
-        task.new.start()
-        self.addCleanup(task.load.stop)
-        self.addCleanup(task.new.stop)
-        task.carried = SimpleNamespace(cells=[])
-        task._pending_cells = lambda _frame: task.carried.cells
-        return task
-
-    def _saved(self):
-        import json
-
-        return json.loads(self.path.read_text(encoding="utf-8"))["saved"]
-
-    def test_a_failure_that_repeats_keeps_the_first_date(self):
-        import json
-        import time
-
-        first = time.time() - 2 * 24 * 3600
-        self.path.write_text(json.dumps({"saved": first, "icons": []}), encoding="utf-8")
-        task = self._task()
-        task.carried.cells = [(0, 1)]
-        task._classify_cells = lambda cells, _stars, _frame: [(0, 1)]
-
-        self.assertFalse(task.run_claim())
-        self.assertEqual(first, self._saved())
-
-    def test_new_junk_alone_gets_a_new_date(self):
-        import json
-        import time
-
-        old = time.time() - 2 * 24 * 3600
-        self.path.write_text(json.dumps({"saved": old, "icons": []}), encoding="utf-8")
-        task = self._task()
-        task._classify_cells = lambda cells, _stars, _frame: [(0, 0)]
-
-        self.assertFalse(task.run_claim())
-        self.assertGreater(self._saved(), time.time() - 60)
-
-    def test_a_failed_look_keeps_the_items_for_the_next_run(self):
-        # The detail check did not finish: a failure, and the new and the
-        # carried items stay listed (with the first date) for the next run.
-        import json
-        import time
-
-        first = time.time() - 24 * 3600
-        self.path.write_text(json.dumps({"saved": first, "icons": []}), encoding="utf-8")
-        task = self._task()
-        task.carried.cells = [(0, 1)]
-        task._classify_cells = lambda cells, _stars, _frame: None
-        task._leave_to_home = lambda *a: True
-        self.assertFalse(task.run_claim())
-        saved = json.loads(self.path.read_text(encoding="utf-8"))
-        self.assertEqual(first, saved["saved"])
-        self.assertEqual(2, len(saved["icons"]))
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "junk_gear_pending.json"
+            path.write_text("{}", encoding="utf-8")
+            with mock.patch("src.tasks.JunkGearTask._pending_file", return_value=path):
+                object.__new__(JunkGearTask)._clear_pending()
+            self.assertFalse(path.exists())
 
 
 def _fake_press_clock(test):
@@ -639,6 +829,8 @@ class DetailPressTest(unittest.TestCase):
     def _task(self, opens_on, closes_on):
         """The popup opens on the ``opens_on``-th cell click and closes on the
         ``closes_on``-th ✕ click (0: never)."""
+        from unittest import mock
+
         from src.tasks.JunkGearTask import DETAIL_CLOSE_POINT, JunkGearTask
 
         task = object.__new__(JunkGearTask)
@@ -663,30 +855,41 @@ class DetailPressTest(unittest.TestCase):
 
         task._click_reference = click
         task._wait_detail = lambda open_, timeout=0: state["open"] == open_
-        task._read_detail = lambda: (GearItem("戒指", "UR", False, False, False), "")
+        # A real 3★ exclusive with its owner line: only the clicks are tested.
+        task._read_detail = lambda: (
+            GearItem("猎人之弓", "SR", False, False, False, owner_line="莉兹内"), "专用装备"
+        )
+        _grid_passes(task, rarity="SR")
+        patcher = mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         return task
+
+    @staticmethod
+    def _classify(cells, task):
+        return task._classify_cells(cells, {"猎人之弓": 3}, _blank(), grade="SR")
 
     def test_a_lost_cell_click_is_pressed_once_more_while_the_grid_shows(self):
         task = self._task(opens_on=2, closes_on=1)
-        self.assertEqual([(0, 0)], task._classify_cells([(0, 0)], {"戒指": 4}))
+        self.assertEqual([(0, 0)], self._classify([(0, 0)], task))
         self.assertEqual(2, len(task.cell_clicks))
         self.assertEqual(1, len(task.close_clicks))
 
     def test_a_cell_that_never_opens_is_a_failure(self):
         task = self._task(opens_on=0, closes_on=1)
-        self.assertIsNone(task._classify_cells([(0, 0), (0, 1)], {"戒指": 4}))
+        self.assertIsNone(self._classify([(0, 0), (0, 1)], task))
         self.assertEqual(2, len(task.cell_clicks))
         self.assertEqual([], task.close_clicks)
         self.assertEqual(1, len(task.warnings))
 
     def test_a_lost_close_is_pressed_again_only_while_the_popup_shows(self):
         task = self._task(opens_on=1, closes_on=2)
-        self.assertEqual([(0, 0)], task._classify_cells([(0, 0)], {"戒指": 4}))
+        self.assertEqual([(0, 0)], self._classify([(0, 0)], task))
         self.assertEqual(2, len(task.close_clicks))
 
     def test_a_popup_that_never_closes_is_a_failure(self):
         task = self._task(opens_on=1, closes_on=0)
-        self.assertIsNone(task._classify_cells([(0, 0), (0, 1)], {"戒指": 4}))
+        self.assertIsNone(self._classify([(0, 0), (0, 1)], task))
         # Two ✕ presses at most, and the next item is never clicked.
         self.assertEqual(2, len(task.close_clicks))
         self.assertEqual(1, len(task.cell_clicks))
@@ -758,10 +961,17 @@ class SortLabelTest(unittest.TestCase):
         self.assertIsNotNone(task._switch_to_newest_first())
         self.assertEqual([], task.saved)
 
-    def test_an_unknown_sort_kind_is_not_saved(self):
-        task = self._menu("按某某从高到低排序", kinds=("获得时间", "某某"))
-        self.assertEqual("按某某从高到低排序", task._switch_to_newest_first())
-        self.assertEqual([], task.saved)
+    def test_any_sort_kind_read_twice_is_saved(self):
+        # Leo 2026-10-11: 「按攻击力从高到低排序」 was not saved (fixed list).
+        task = self._menu("按攻击力从高到低排序", kinds=("获得时间", "攻击力"))
+        self.assertEqual("按攻击力从高到低排序", task._switch_to_newest_first())
+        self.assertEqual(["按攻击力从高到低排序"], task.saved)
+
+    def test_a_stat_sort_is_restored_not_its_percent_neighbour(self):
+        # Leo's menu lists 按攻击力排序 right above 按攻击力百分比排序.
+        task = self._menu("按获得时间从晚到早排序", kinds=("获得时间", "攻击力百分比", "攻击力"))
+        self.assertTrue(task._restore_sort("按攻击力从高到低排序"))
+        self.assertEqual("按攻击力从高到低排序", task.menu["active"])
 
     def test_a_saved_label_missing_a_character_is_restored(self):
         task = self._menu("按获得时间从晚到早排序")
@@ -797,10 +1007,17 @@ class SavedSortRecoveryTest(unittest.TestCase):
         task.log_warning = lambda message, **k: task.warnings.append((message, k.get("notify")))
         task._colours_distorted = lambda: False
         task._open_equipment_bag = lambda: True
+        _filter_stubs(task)
         task._restore_sort = lambda _label: False
-        # Reaching the switch means the run went on; it stops there.
-        task._switch_to_newest_first = lambda: None
         task.stages = []
+        # Reaching the switch means the run went on.  It does not switch,
+        # and the run goes on with the bag's own sort.
+        task._switch_to_newest_first = lambda: task.stages.append("切到获得时间") or None
+        task.config = {}
+        task._clear_pending = lambda: None
+        task._dismantle_filtered = lambda *a: (True, "", True)
+        task._restore_bag_detail_view = lambda: None
+        task._leave_to_home = lambda *a: True
         task._claim_fail = lambda stage: task.stages.append(stage) or False
         task.run_claim()
         return task
@@ -817,7 +1034,7 @@ class SavedSortRecoveryTest(unittest.TestCase):
         self.assertEqual(["恢复上次的背包排序"], self._run().stages)
         self.assertTrue(self.path.exists())
         task = self._run()
-        self.assertEqual(["切换为按获得时间排序"], task.stages)
+        self.assertEqual(["切到获得时间"], task.stages)
         self.assertFalse(self.path.exists())
         self.assertTrue(any(notify for _message, notify in task.warnings))
 
@@ -829,5 +1046,237 @@ class SavedSortRecoveryTest(unittest.TestCase):
             {"original": "按稀有从高到低排序"},  # written before the date was kept
         ):
             self._write(state)
-            self.assertEqual(["切换为按获得时间排序"], self._run().stages)
+            self.assertEqual(["切到获得时间"], self._run().stages)
             self.assertFalse(self.path.exists())
+
+
+class ArrowSortLabelTest(unittest.TestCase):
+    """Player 2026-10-11 (v0.1.23, 1080p windowed): the menu read
+    「按魔法抵抗排序 | 按暴击率排序 | 按暴击伤害排序 | 有自定义标记优先▼」 and the
+    run stopped: only labels with 从…到… counted as the active one."""
+
+    def test_the_arrow_marks_the_active_option(self):
+        from types import SimpleNamespace
+
+        from src.tasks.JunkGearTask import active_sort_label
+
+        boxes = [
+            SimpleNamespace(name=text)
+            for text in ("按魔法抵抗排序", "按暴击率排序", "按暴击伤害排序", "有自定义标记优先▼")
+        ]
+        self.assertEqual("有自定义标记优先", active_sort_label(boxes))
+
+    def test_a_direction_still_wins(self):
+        from types import SimpleNamespace
+
+        from src.tasks.JunkGearTask import active_sort_label
+
+        boxes = [
+            SimpleNamespace(name="有自定义标记优先▼"),
+            SimpleNamespace(name="按强化从高到低排序↓"),
+        ]
+        self.assertEqual("按强化从高到低排序", active_sort_label(boxes))
+        self.assertIsNone(active_sort_label([SimpleNamespace(name="按攻击力排序")]))
+
+
+class CraftNWhenNothingDismantledTest(unittest.TestCase):
+    """B站 渐崩渐晰 2026-10-11: two days without a dismantle missed the daily
+    装备分解; no test covered a run that dismantled nothing.  Such a run now
+    crafts one N item and dismantles it (Leo 2026-10-11)."""
+
+    def _task(self, junk_cells, dismantle_ok=True, craft_ok=True):
+        from unittest import mock
+
+        from src.tasks.JunkGearTask import JunkGearTask
+
+        task = object.__new__(JunkGearTask)
+        task.config = {}
+        task.info_set = lambda *a: None
+        task.log_info = lambda *a, **k: None
+        task.log_warning = lambda *a, **k: None
+        task.sleep = lambda *a: None
+        task._colours_distorted = lambda: False
+        task._open_equipment_bag = lambda: True
+        task._saved_sort = lambda: None
+        task._clear_saved_sort = lambda: None
+        task._switch_to_newest_first = lambda: "按获得时间从新到旧排序"
+        task._restore_sort = lambda _label: True
+        task._restore_bag_detail_view = lambda: None
+        task._still_grid_frame = lambda: object()
+        task._clear_pending = lambda: None
+        _filter_stubs(task)
+        # Every shown item is junk here.
+        task._classify_cells = lambda cells, stars, frame, grade="R": list(cells)
+        task._enhance_and_dismantle = mock.Mock(return_value=dismantle_ok)
+        task._open_craft_page = mock.Mock(return_value=True)
+        task._open_n_recipe = lambda: True
+        task._craft = mock.Mock(return_value=craft_ok)
+        task._craft_back_to_bag = lambda: True
+        task._leave_to_home = lambda *a: True
+        task.stages = []
+        task._claim_fail = lambda stage: task.stages.append(stage) or False
+        patches = (
+            mock.patch("src.tasks.JunkGearTask.load_exclusive_stars", return_value={}),
+            # R shows ``junk_cells``, SR nothing.
+            mock.patch(
+                "src.tasks.JunkGearTask.occupied_cells",
+                side_effect=lambda *a, shown=iter([junk_cells]): next(shown, []),
+            ),
+            mock.patch("src.tasks.JunkGearTask.SLOW_PC_GRACE_SECONDS", 0),
+        )
+        for patcher in patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return task
+
+    def test_no_junk_crafts_and_dismantles_one_n_item(self):
+        task = self._task([])
+        self.assertTrue(task.run_claim())
+        task._craft.assert_called_once_with(5, 1)
+
+    def test_dismantled_junk_crafts_nothing(self):
+        task = self._task([(0, 0)])
+        self.assertTrue(task.run_claim())
+        task._enhance_and_dismantle.assert_called_once()
+        task._open_craft_page.assert_not_called()
+
+    def test_a_failed_craft_says_so(self):
+        task = self._task([], craft_ok=False)
+        self.assertFalse(task.run_claim())
+        self.assertEqual(["制作 N 装备分解"], task.stages)
+
+
+class AfterGachaNewMarkedTest(unittest.TestCase):
+    """Leo 2026-10-11: right after 抽抽乐, only the yellow 「!」 items, the
+    bag's filter and sort untouched; dismantled → no filter pass; nothing
+    dismantled (or not after 抽抽乐) → the filter flow as before."""
+
+    def _task(self, marked, after_gacha=True, dismantle_ok=True):
+        from unittest import mock
+
+        from src.tasks.JunkGearTask import AFTER_GACHA_KEY, JunkGearTask
+
+        task = object.__new__(JunkGearTask)
+        task.config = {AFTER_GACHA_KEY: after_gacha}
+        task.info_set = lambda *a: None
+        task.log_info = lambda *a, **k: None
+        task.log_warning = lambda *a, **k: None
+        task.sleep = lambda *a: None
+        task._colours_distorted = lambda: False
+        task._open_equipment_bag = lambda: True
+        task._saved_sort = lambda: None
+        task._clear_saved_sort = lambda: None
+        task._switch_to_newest_first = mock.Mock(return_value="按获得时间从新到旧排序")
+        task._restore_sort = lambda _label: True
+        task._restore_bag_detail_view = lambda: None
+        task._still_grid_frame = lambda: object()
+        task._clear_pending = lambda: None
+        _filter_stubs(task)
+        task._read_bag_filter = mock.Mock(return_value={"grade": None, "worn": True})
+        task.judged = []
+        task._classify_cells = lambda cells, stars, frame, grade="R": task.judged.append(
+            (grade, list(cells))
+        ) or list(cells)
+        task._enhance_and_dismantle = mock.Mock(return_value=dismantle_ok)
+        task._dismantle_crafted_n = lambda: True
+        task._leave_to_home = lambda *a: True
+        task._claim_fail = lambda stage: False
+        patches = (
+            mock.patch("src.tasks.JunkGearTask.load_exclusive_stars", return_value={}),
+            mock.patch("src.tasks.JunkGearTask.leading_new_cells", return_value=marked),
+            mock.patch("src.tasks.JunkGearTask.occupied_cells", return_value=[]),
+            mock.patch("src.tasks.JunkGearTask.SLOW_PC_GRACE_SECONDS", 0),
+        )
+        for patcher in patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return task
+
+    def test_marked_items_dismantled_leave_filter_and_sort_alone(self):
+        task = self._task([(2, 3), (4, 0)])
+        self.assertTrue(task.run_claim())
+        self.assertEqual([(None, [(2, 3), (4, 0)])], task.judged)
+        task._read_bag_filter.assert_not_called()
+        task._switch_to_newest_first.assert_not_called()
+        self.assertEqual([], task.filter_sets)
+
+    def test_no_marked_item_goes_on_with_the_filter(self):
+        task = self._task([])
+        self.assertTrue(task.run_claim())
+        task._read_bag_filter.assert_called_once()
+        self.assertEqual("R", task.filter_sets[0]["grade"])
+
+    def test_marked_items_not_dismantled_go_on_with_the_filter(self):
+        from unittest import mock
+
+        task = self._task([(0, 0)])
+        task._enhance_and_dismantle = mock.Mock(return_value=None)  # batch skipped
+        self.assertTrue(task.run_claim())
+        task._read_bag_filter.assert_called_once()
+
+    def test_not_after_the_gacha_skips_the_marked_pass(self):
+        task = self._task([(0, 0)], after_gacha=False)
+        self.assertTrue(task.run_claim())
+        self.assertNotIn((None, [(0, 0)]), task.judged)
+        task._read_bag_filter.assert_called_once()
+
+    def _counted(self, marked, cap):
+        from unittest import mock
+
+        task = self._task(marked)
+        task.config["最多处理件数"] = cap
+        task._enhance_and_dismantle = mock.Mock(return_value=None)  # nothing dismantled
+        task._front_items = mock.Mock(return_value=(object(), []))
+        task._dismantle_crafted_n = mock.Mock(return_value=True)
+        return task
+
+    def test_the_filter_pass_only_gets_what_the_marked_pass_left(self):
+        # Leo 2026-10-11 「處理的件數都不可以超過設定裡面的件數」
+        task = self._counted([(0, 0), (0, 1), (0, 2)], cap=5)
+        self.assertTrue(task.run_claim())
+        self.assertEqual(2, task._front_items.call_args_list[0].args[0])
+        for call in task._front_items.call_args_list:
+            self.assertLessEqual(call.args[0], 2)
+        task._dismantle_crafted_n.assert_called_once()
+
+    def test_no_filter_pass_and_no_n_item_once_the_count_is_used_up(self):
+        task = self._counted([(0, 0), (0, 1)], cap=2)
+        self.assertTrue(task.run_claim())
+        task._front_items.assert_not_called()
+        task._dismantle_crafted_n.assert_not_called()
+
+
+class NewMarkedLiveTest(unittest.TestCase):
+    """Leo's 4K bag 2026-10-11 (his own sort): five new items with 「!」 in
+    row 1 (SR bow, locked UR, R, R, UR), read from the front up to the
+    first item without one; a bag of enhanced UR has none."""
+
+    def _grid(self, name):
+        frame = np.zeros((1080, 1920, 3), np.uint8)
+        crop = cv2.imread(str(Path(__file__).parent / "fixtures" / "junk_gear" / name))
+        frame[140 : 140 + crop.shape[0], 700 : 700 + crop.shape[1]] = crop
+        return frame
+
+    def test_the_five_new_items_and_no_other(self):
+        from src.tasks.GearTasks import GRID_COLUMNS, GRID_ROWS
+        from src.utils.junk_gear import leading_new_cells
+
+        frame = self._grid("grid_new_marked_leo_4k_at_1080.jpg")
+        self.assertEqual(
+            [(0, c) for c in range(5)], leading_new_cells(frame, GRID_COLUMNS, GRID_ROWS, 40)
+        )
+
+    def test_one_item_drawn_from_the_gacha_is_read_alone(self):
+        # Leo's 4K bag right after one 抽抽乐 draw (15:24Z): one R at the front.
+        from src.tasks.GearTasks import GRID_COLUMNS, GRID_ROWS
+        from src.utils.junk_gear import leading_new_cells
+
+        frame = self._grid("grid_one_new_r_after_gacha_leo_4k_at_1080.jpg")
+        self.assertEqual([(0, 0)], leading_new_cells(frame, GRID_COLUMNS, GRID_ROWS, 40))
+
+    def test_colourful_ur_labels_are_not_marks(self):
+        from src.tasks.GearTasks import GRID_COLUMNS, GRID_ROWS
+        from src.utils.junk_gear import leading_new_cells
+
+        frame = self._grid("grid_ur_no_marks_leo_4k_at_1080.jpg")
+        self.assertEqual([], leading_new_cells(frame, GRID_COLUMNS, GRID_ROWS, 40))

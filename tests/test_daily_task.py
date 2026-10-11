@@ -97,7 +97,6 @@ class DailyTaskHelperTest(unittest.TestCase):
             "识别成功后等待秒数",
             "快速狩猎双倍策略",
             "快速狩猎资源倾向",
-            "快速狩猎米饭分配",
         ):
             self.assertIn(key, visible_keys)
         self.assertNotIn("快速狩猎章节图", visible_keys)
@@ -1042,14 +1041,20 @@ class DailyTaskHelperTest(unittest.TestCase):
         self.assertEqual([(165, 260)], reference_clicks)
         self.assertEqual([(1090, 900), (960, 1000), (832, 900)], clicks)
 
-    def test_business_collect_without_claim_button_closes_popup_by_ocr(self):
-        # 一键获得 outside the popup band is not the popup's button.
+    def test_business_collect_unread_claim_is_pressed_in_the_cancel_row(self):
+        # 一键获得 outside the popup band is not the popup's button; the real
+        # one, not read, is pressed right of 取消 in its row (Leo 2026-10-11:
+        # a player's run left it lit and the day's 结算营业额 was missed).
         popup = self._popup(cancel_y=760) + [self._business_box("一键获得", 1750, 900)]
-        task, reference_clicks, clicks = self._business_task([popup])
+        overlay = [self._business_box("点击画面即可返回", 960, 1000)]
+        task, reference_clicks, clicks = self._business_task([popup, overlay, overlay, []])
+        recheck = patch("src.tasks.DailyTask.BUSINESS_CLAIM_RECHECK_SECONDS", 0.0)
+        recheck.start()
+        self.addCleanup(recheck.stop)
 
         self.assertTrue(DailyTask.run_business_collect(task))
         self.assertEqual([(165, 260)], reference_clicks)
-        self.assertEqual([(832, 760)], clicks)
+        self.assertEqual((1090, 760), clicks[0])
 
     def test_business_collect_waits_for_a_claim_button_that_fades_in(self):
         # Live 1080p 2026-09-28: the popup gate passed before 一键获得 showed.
@@ -1059,12 +1064,28 @@ class DailyTaskHelperTest(unittest.TestCase):
         DailyTask.run_business_collect(task)
         self.assertIn((1090, 814), clicks)
 
-    def test_business_collect_without_any_button_uses_safe_close_point(self):
+    def test_business_collect_without_any_button_presses_the_usual_spot(self):
+        # Neither button read: 一键获得 is pressed at its usual spot; grey after
+        # it means collected already.
         task, reference_clicks, clicks = self._business_task([self._popup()])
+        self._paint_button(task, (128, 128, 128), 814)
+        statuses = {}
+        task._status_set = statuses.__setitem__
 
         self.assertTrue(DailyTask.run_business_collect(task))
-        self.assertEqual([(165, 260), (832, 814)], reference_clicks)
-        self.assertEqual([], clicks)
+        self.assertEqual((1090, 814), clicks[0])
+        self.assertEqual([(165, 260)], reference_clicks[:1])
+        self.assertEqual("按钮是灰的", statuses["一键收菜结果"])
+
+    def test_business_collect_unread_lit_spot_without_reward_is_not_done(self):
+        task, _reference_clicks, clicks = self._business_task([self._popup()])
+        self._paint_button(task, (250, 250, 250), 814)
+        statuses = {}
+        task._status_set = statuses.__setitem__
+
+        self.assertFalse(DailyTask.run_business_collect(task))
+        self.assertEqual((1090, 814), clicks[0])
+        self.assertEqual("未确认领取", statuses["一键收菜结果"])
 
     def test_business_collect_skips_when_popup_is_not_found(self):
         task, reference_clicks, clicks = self._business_task([])
@@ -1114,9 +1135,16 @@ class DailyTaskHelperTest(unittest.TestCase):
         frame[int(box.y) : int(box.y + box.height), int(box.x) : int(box.x + box.width)] = bgr
         task.capture_frame = lambda: frame
 
-    def test_business_collect_grey_claim_button_is_not_pressed(self):
-        # Live 4K 2026-10-10: nothing to collect, 一键获得 greyed out but read
-        # by OCR; pressing it twice failed 公会小屋酒馆.
+    def _paint_button(self, task, bgr, ref_y):
+        # The whole button (about 235×47 at 1080p) on the 4K test client.
+        frame = np.zeros((2160, 3840, 3), dtype=np.uint8)
+        frame[(ref_y - 23) * 2 : (ref_y + 23) * 2, (1090 - 117) * 2 : (1090 + 117) * 2] = bgr
+        task.capture_frame = lambda: frame
+
+    def test_business_collect_grey_claim_button_is_pressed_and_counts_as_done(self):
+        # Live 4K 2026-10-10: already collected, 一键获得 greyed out; pressing
+        # it gave no reward and failed 公会小屋酒馆.  It is still pressed (Leo
+        # 2026-10-11 「灰的 亮的 都要按」); grey afterwards counts as done.
         popup = self._popup(claim_y=814, cancel_y=814)
         task, _reference_clicks, clicks = self._business_task([popup])
         self._paint_claim(task, (128, 128, 128))
@@ -1124,7 +1152,7 @@ class DailyTaskHelperTest(unittest.TestCase):
         task._status_set = statuses.__setitem__
 
         self.assertTrue(DailyTask.run_business_collect(task))
-        self.assertEqual([(832, 814)], clicks)
+        self.assertEqual((1090, 814), clicks[0])
         self.assertEqual("按钮是灰的", statuses["一键收菜结果"])
 
     def test_business_collect_claim_button_dim_while_fading_in_is_pressed(self):
@@ -1480,7 +1508,8 @@ class DailyTaskHelperTest(unittest.TestCase):
             task._quick_hunt_double_states(),
         )
 
-    def test_quick_hunt_prefer_double_uses_gold_when_both_routes_are_double(self):
+    def test_quick_hunt_prefer_double_follows_preference_when_both_routes_are_double(self):
+        # Leo 2026-10-11: 「優先雙倍 如果兩個都雙倍 那就看資源傾向」 (weekends).
         task = object.__new__(QuickHuntTask)
         task.config = {
             "快速狩猎双倍策略": "优先双倍",
@@ -1493,7 +1522,23 @@ class DailyTaskHelperTest(unittest.TestCase):
         )
         task.log_info = lambda *_args, **_kwargs: None
 
-        self.assertTrue(task._quick_hunt_select_adventure_route())
+        self.assertEqual("经验", task._quick_hunt_select_adventure_route())
+        self.assertEqual(["经验"], clicks)
+
+    def test_quick_hunt_prefer_double_takes_the_only_double_route(self):
+        task = object.__new__(QuickHuntTask)
+        task.config = {
+            "快速狩猎双倍策略": "优先双倍",
+            "快速狩猎资源倾向": "经验",
+        }
+        task._quick_hunt_double_states = lambda: {"金币": True, "经验": False}
+        clicks = []
+        task._quick_hunt_click_adventure = (
+            lambda resource: clicks.append(resource) or True
+        )
+        task.log_info = lambda *_args, **_kwargs: None
+
+        self.assertEqual("金币", task._quick_hunt_select_adventure_route())
         self.assertEqual(["金币"], clicks)
 
     def test_quick_hunt_ignore_double_always_selects_gold(self):
@@ -1514,39 +1559,58 @@ class DailyTaskHelperTest(unittest.TestCase):
         self.assertTrue(task._quick_hunt_select_adventure_route())
         self.assertEqual(["金币"], clicks)
 
-    def test_quick_hunt_scheduler_uses_current_default_hunting_ground(self):
+    def test_quick_hunt_scheduler_spends_all_rice_on_the_adventure_route(self):
+        # Leo 2026-10-11: no 狩猎场 any more, all free rice goes to 冒险航线.
         task = object.__new__(QuickHuntTask)
-        task.config = {
-            "快速狩猎米饭分配": "狩猎场x1 / 双倍图MAX",
-        }
+        task.config = {}
         task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
-        calls = []
         task._quick_hunt_resource_empty = lambda _resource: False
-        task._quick_hunt_select_hunting_ground = lambda: self.fail(
-            "current default hunting ground must not be changed"
-        )
-        task._quick_hunt_select_adventure_route = (
-            lambda: calls.append("adventure-no-double") or False
-        )
+        task._quick_hunt_select_adventure_route = lambda: "经验"
+        calls = []
         task._quick_hunt_execute_current_map = (
-            lambda mode, stage: calls.append((stage, mode)) or "done"
+            lambda mode, stage, expected_map_pattern=None: calls.append(
+                (stage, mode, expected_map_pattern)
+            )
+            or "done"
         )
 
         self.assertTrue(task._quick_hunt_run_rice_scheduler())
-        self.assertEqual(
-            [
-                ("狩猎场", "MIN"),
-                "adventure-no-double",
-            ],
-            calls,
+        self.assertEqual([("冒险航线", "MAX", r"史莱姆王国")], calls)
+
+    def test_quick_hunt_scheduler_without_a_route_hunts_nothing(self):
+        task = object.__new__(QuickHuntTask)
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task._quick_hunt_resource_empty = lambda _resource: False
+        task._quick_hunt_select_adventure_route = lambda: None
+        task._quick_hunt_execute_current_map = lambda *_args, **_kwargs: self.fail(
+            "no route picked: nothing may be hunted (狩猎场 is gone)"
         )
+
+        self.assertTrue(task._quick_hunt_run_rice_scheduler())
+
+    def test_quick_hunt_prefer_double_without_double_uses_preferred_route(self):
+        task = object.__new__(QuickHuntTask)
+        task.config = {
+            "快速狩猎双倍策略": "优先双倍",
+            "快速狩猎资源倾向": "经验",
+        }
+        task._quick_hunt_double_states = lambda: {"金币": False, "经验": False}
+        task.sleep = lambda *_args, **_kwargs: None
+        clicks = []
+        task._quick_hunt_click_adventure = (
+            lambda resource: clicks.append(resource) or True
+        )
+        task.log_info = lambda *_args, **_kwargs: None
+
+        self.assertEqual("经验", task._quick_hunt_select_adventure_route())
+        self.assertEqual(["经验"], clicks)
 
     def test_quick_hunt_adventure_wrong_map_reselects_by_ocr_once(self):
         task = object.__new__(QuickHuntTask)
-        task.config = {
-            "快速狩猎米饭分配": "狩猎场x1 / 双倍图MAX",
-        }
+        task.config = {}
         task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
         task._quick_hunt_resource_empty = lambda _resource: False
@@ -1555,7 +1619,7 @@ class DailyTaskHelperTest(unittest.TestCase):
         task._quick_hunt_click_adventure = (
             lambda resource: calls.append(("reselect", resource)) or True
         )
-        results = iter(("done", "wrong_map", "done"))
+        results = iter(("wrong_map", "done"))
         task._quick_hunt_execute_current_map = (
             lambda mode, stage, expected_map_pattern=None: calls.append(
                 (stage, mode, expected_map_pattern)
@@ -1566,7 +1630,6 @@ class DailyTaskHelperTest(unittest.TestCase):
         self.assertTrue(task._quick_hunt_run_rice_scheduler())
         self.assertEqual(
             [
-                ("狩猎场", "MIN", None),
                 ("冒险航线", "MAX", r"哥布林遗迹"),
                 ("reselect", "金币"),
                 ("冒险航线重试", "MAX", r"哥布林遗迹"),
@@ -1574,27 +1637,49 @@ class DailyTaskHelperTest(unittest.TestCase):
             calls,
         )
 
-    def test_quick_hunt_max_hunting_mode_skips_adventure_route(self):
+    def test_quick_hunt_strategy_offers_only_prefer_and_ignore_double(self):
+        # Leo 2026-10-11: 「快速狩獵設定頁 只需要優先雙倍 忽視雙倍」.
+        task = object.__new__(QuickHuntTask)
+        task.default_config = {}
+        task.config_description = {}
+        task.config_type = {}
+        task.include_quick_hunt_config = True
+        task._install_quick_hunt_config()
+        self.assertEqual(
+            ["优先双倍", "忽视双倍"],
+            task.config_type["快速狩猎双倍策略"]["options"],
+        )
+        self.assertNotIn("强制双倍", task.config_description["快速狩猎双倍策略"])
+
+    def test_quick_hunt_saved_force_double_runs_as_prefer_double(self):
         task = object.__new__(QuickHuntTask)
         task.config = {
-            "快速狩猎米饭分配": "狩猎场MAX / 跳过冒险航线",
+            "快速狩猎双倍策略": "强制双倍",
+            "快速狩猎资源倾向": "经验",
         }
-        task.info_set = lambda *_args, **_kwargs: None
+        task._quick_hunt_double_states = lambda: {"金币": False, "经验": False}
+        task.sleep = lambda *_args, **_kwargs: None
+        clicks = []
+        task._quick_hunt_click_adventure = (
+            lambda resource: clicks.append(resource) or True
+        )
         task.log_info = lambda *_args, **_kwargs: None
-        task._quick_hunt_resource_empty = lambda _resource: False
-        task._quick_hunt_select_hunting_ground = lambda: self.fail(
-            "current default hunting ground must not be changed"
-        )
-        calls = []
-        task._quick_hunt_execute_current_map = (
-            lambda mode, stage: calls.append((stage, mode)) or "done"
-        )
-        task._quick_hunt_select_adventure_route = lambda: self.fail(
-            "MAX hunting allocation must skip adventure"
-        )
 
-        self.assertTrue(task._quick_hunt_run_rice_scheduler())
-        self.assertEqual([("狩猎场", "MAX")], calls)
+        self.assertEqual("经验", task._quick_hunt_select_adventure_route())
+        self.assertEqual(["经验"], clicks)
+
+    def test_quick_hunt_settings_have_no_rice_split(self):
+        task = object.__new__(QuickHuntTask)
+        task.default_config = {}
+        task.config_description = {}
+        task.config_type = {}
+        task.include_quick_hunt_config = True
+        task._install_quick_hunt_config()
+        self.assertNotIn("快速狩猎米饭分配", task.default_config)
+        self.assertNotIn(
+            "快速狩猎米饭分配",
+            task.config_type["执行快速狩猎"]["sub_configs"][True],
+        )
 
     def test_quick_hunt_stone_counts_follow_top_to_bottom_element_order(self):
         task = object.__new__(QuickHuntTask)
