@@ -35,8 +35,11 @@ class RefineSelectionTest(unittest.TestCase):
             cells,
         )
 
-    def test_first_badge_below_24_is_chosen(self):
-        self.assertEqual((1, 1, 22), refine_candidate(badge_cells(self.LIVE)))
+    def test_18_to_20_are_chosen_first(self):
+        # Leo 2026-10-11 「可以請程式先優先抓 18 19 20這三個」: 20 at (1, 4)
+        # before the 22 at (1, 1) that comes first in the grid.
+        self.assertEqual((1, 4, 20), refine_candidate(badge_cells(self.LIVE)))
+        self.assertEqual((1, 1, 22), refine_candidate([(0, 0, 24), (1, 1, 22), (2, 0, 12)]))
 
     def test_split_badge_digits_are_joined(self):
         # Live 4K 2026-10-05: one 24 badge OCR'd as "2" and "4".
@@ -96,7 +99,8 @@ class RefineRetryTest(unittest.TestCase):
 
         task = self._task(["maxed", "refined"])
         # A misread "21" (really 24) is opened, found maxed, then skipped.
-        cells = [(0, 1, 21), (0, 6, 18)]
+        # (Not 18 for the second: 18-20 are now tried first, 2026-10-11.)
+        cells = [(0, 1, 21), (0, 6, 22)]
         with mock.patch("src.tasks.GearTasks.badge_cells", return_value=cells):
             self.assertTrue(task.run_claim())
         self.assertEqual([(0, 1), (0, 6)], task.tried)

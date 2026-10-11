@@ -7,6 +7,7 @@ A player's 问题摘要 (v0.1.17, 2560×1440 windowed, 2026-10-10) had only
 
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 
 def _task(detail, popup_closes=True):
@@ -23,10 +24,17 @@ def _task(detail, popup_closes=True):
     task._wait_for_title = lambda *_a, **_k: True
     task.capture_frame = lambda: None
     task._roi_boxes = lambda *_a, **_k: [] if popup_closes else detail
+    task.sleep = lambda *_a: None
+    task.refine_page = False
+    task._title_visible = lambda *_a, **_k: task.refine_page
     return task
 
 
-POPUP = [SimpleNamespace(name="分解", x=1200, y=720, width=60, height=30)]
+# An item not yet fully enhanced (Leo's frame 145607-refine-popup-r-new.png).
+POPUP = [
+    SimpleNamespace(name="穿戴", x=1190, y=720, width=60, height=30),
+    SimpleNamespace(name="强化", x=1330, y=720, width=60, height=30),
+]
 
 
 class NoRefineButtonTest(unittest.TestCase):
@@ -34,13 +42,31 @@ class NoRefineButtonTest(unittest.TestCase):
         task = _task(POPUP)
         self.assertEqual("no_button", task._refine_cell(0, 1))
         self.assertIn("第1行第2列", task.logs[-1])
-        self.assertIn("读到「分解」", task.logs[-1])
+        self.assertIn("读到「穿戴 强化」", task.logs[-1])
         self.assertEqual(["daily_refine_no_refine_button"], task.diagnostics)
 
-    def test_nothing_read_says_so(self):
+    def test_nothing_read_presses_the_usual_spot_once(self):
+        # YES-BD2 #12: 「兴」 at 2K, nothing at 720p.  No 强化 read, so the
+        # item may well have 精炼: its usual spot is pressed and the refine
+        # page must show.
+        from src.tasks import GearTasks
+        from src.tasks.GearTasks import REFINE_BUTTON_USUAL_POINT
+
+        self.enterContext(mock.patch.object(GearTasks, "REFINE_RESULT_SECONDS", 0.0))
+        for detail in ([], [SimpleNamespace(name="兴", x=1340, y=720, width=20, height=30)]):
+            with self.subTest(detail=detail):
+                task = _task(detail)
+                self.assertEqual("failed", task._refine_cell(2, 0))
+                self.assertEqual(REFINE_BUTTON_USUAL_POINT, task.presses[-1])
+                self.assertEqual(2, len(task.presses))
+                self.assertIn("照平常位置点了也没进精炼页", task._why)
+                self.assertTrue(any("照精炼平常的位置点一下" in line for line in task.logs))
+
+    def test_the_usual_spot_that_opens_the_refine_page_goes_on_with_its_checks(self):
         task = _task([])
-        self.assertEqual("no_button", task._refine_cell(2, 0))
-        self.assertIn("读到「没读到字」", task.logs[-1])
+        task.refine_page = True
+        task._refine_on_page = lambda: "refined"
+        self.assertEqual("refined", task._refine_cell(2, 0))
 
     def test_the_popup_is_closed_with_one_back_press(self):
         from src.tasks.claim_page import BACK_BUTTON_POINT
@@ -84,12 +110,29 @@ class NextItemTest(unittest.TestCase):
         self.assertTrue(done)
         self.assertEqual([(0, 1), (0, 2)], task.tried)
 
-    def test_no_item_with_refine_fails_after_three(self):
-        cells = [(0, 1, 12), (0, 2, 15), (0, 3, 16), (0, 4, 17)]
-        task, done = self._run(["no_button"] * 3, cells)
+    def test_items_without_refine_do_not_use_up_the_three_tries(self):
+        # YES-BD2 #12 (2026-10-10): opening and closing an item costs nothing,
+        # so a refinable item further on is still reached.
+        cells = [(0, column, 12 + column) for column in range(6)]
+        task, done = self._run(["no_button"] * 5 + ["refined"], cells)
+        self.assertTrue(done)
+        self.assertEqual(6, len(task.tried))
+
+    def test_no_item_with_refine_fails_after_ten(self):
+        from src.tasks.GearTasks import REFINE_NO_BUTTON_PROBES
+
+        cells = [(row, column, 12) for row in range(2) for column in range(8)]
+        task, done = self._run(["no_button"] * REFINE_NO_BUTTON_PROBES, cells)
+        self.assertFalse(done)
+        self.assertEqual(REFINE_NO_BUTTON_PROBES, len(task.tried))
+        self.assertIn("都没有精炼按钮", task._why)
+        self.assertIn("精炼失败", task.info["状态"])
+
+    def test_three_items_at_the_cap_still_stop(self):
+        cells = [(0, column, 12 + column) for column in range(6)]
+        task, done = self._run(["maxed"] * 3, cells)
         self.assertFalse(done)
         self.assertEqual(3, len(task.tried))
-        self.assertEqual("每日精炼一次：精炼失败。", task.info["状态"])
 
 
 class FailureReasonTest(unittest.TestCase):
@@ -119,13 +162,13 @@ class FailureReasonTest(unittest.TestCase):
 
     def test_the_summary_names_the_missing_button(self):
         task, stage = self._run(POPUP)
-        reason = "精炼失败：第1行第2列的装备详情里没有精炼按钮（按钮处读到「分解」）"
+        reason = "精炼失败：第1行第2列的装备详情里没有精炼按钮（按钮处读到「穿戴 强化」）"
         self.assertEqual(reason, stage)
         self.assertEqual(f"每日精炼一次：{reason}。", task.info["状态"])
         self.assertEqual([f"每日精炼一次：{reason}。"], task.warnings)
 
     def test_a_failure_without_a_reason_still_says_refine_failed(self):
-        task, stage = self._run([])
+        task, stage = self._run(POPUP)
         task._why = ""
         task._refine_fail("精炼")
         self.assertEqual("精炼失败", task.info["当前阶段"])

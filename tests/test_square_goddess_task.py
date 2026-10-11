@@ -404,6 +404,8 @@ class SquareGoddessEntryTest(unittest.TestCase):
             lambda **_kwargs: stages.append("pray") or True
         )
         task._wished_today = lambda: False
+        task._prayer_prompt_steady = lambda: False
+        task._press_row_where_it_usually_is = lambda: False
 
         self.assertFalse(SquareGoddessTask._pray_at_goddess(task))
         self.assertEqual(

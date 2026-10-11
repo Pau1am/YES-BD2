@@ -700,8 +700,11 @@ class NavigatorTest(unittest.TestCase):
         )
         vision = SimpleNamespace(
             capture=lambda: frame,
+            # The hand goes once the press lands (the map opens).
             match=lambda received, spec: (
-                self.assertIs(received, frame) or self.assertIs(spec, HAND_TEMPLATE) or hand
+                self.assertIs(received, frame)
+                or self.assertIs(spec, HAND_TEMPLATE)
+                or (MatchResult(0.1, (0, 0), (0, 0)) if clicks else hand)
             ),
             passes=lambda result, spec: result is hand and spec is HAND_TEMPLATE,
             click_client=lambda point, shape, after_sleep=0: clicks.append(
@@ -816,7 +819,9 @@ class NavigatorTest(unittest.TestCase):
         def match(received, spec):
             self.assertIs(received, frame)
             self.assertIs(spec, HAND_TEMPLATE)
-            return hand
+            # The hand goes once its press lands (the map opens).
+            pressed = any(point == hand.center for point, _shape, _sleep in clicks)
+            return MatchResult(0.1, (0, 0), (0, 0)) if pressed else hand
 
         vision = SimpleNamespace(
             capture=lambda: frame,

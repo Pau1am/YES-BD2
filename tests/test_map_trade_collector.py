@@ -1427,12 +1427,12 @@ class CollectorSkillTest(unittest.TestCase):
             map_role=CollectionMapRole.BATTLE_AREA_1,
         )
 
-        self.assertEqual(0.8, PIPELINE_CLICK_INTERVAL)
+        self.assertEqual(1.2, PIPELINE_CLICK_INTERVAL)
         presses = [index for index, event in enumerate(events) if event == "click"]
         self.assertEqual(3, len(presses))
         for previous, current in zip(presses, presses[1:]):
             waits = [value for value in events[previous + 1:current] if value != "click"]
-            self.assertGreater(sum(waits), 0.7)
+            self.assertGreater(sum(waits), 1.1)
 
     def test_suppression_count_roi_uses_manual_fixed_region(self):
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
