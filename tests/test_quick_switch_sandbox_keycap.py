@@ -14,6 +14,7 @@ from src.tasks.map_trade.navigator_story import (
     FIELD_QUICK_SWITCH_REFERENCE_POINT,
     QUICK_SWITCH_TEMPLATE,
 )
+from src.utils.cartridge_quick_switch import QUICK_SWITCH_STABLE_FRAMES
 
 
 def _navigator(keycaps_pass, page_opens=True):
@@ -46,8 +47,8 @@ class SandboxQuickSwitchKeycapTest(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual([FIELD_QUICK_SWITCH_REFERENCE_POINT], reference_clicks)
-        # Still three agreeing samples on the field.
-        self.assertEqual([(QUICK_SWITCH_TEMPLATE, 3)], template_calls)
+        # Two agreeing frames press it (Leo 10-11).
+        self.assertEqual([(QUICK_SWITCH_TEMPLATE, QUICK_SWITCH_STABLE_FRAMES)], template_calls)
 
     def test_the_page_check_still_has_to_pass(self):
         navigator, _calls, reference_clicks = _navigator(keycaps_pass=True, page_opens=False)

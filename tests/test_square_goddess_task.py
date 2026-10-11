@@ -1,6 +1,6 @@
 import unittest
 
-from src.utils.image_utils import STABLE_MATCH_WINDOW_SAMPLES as STABLE_WINDOW
+from src.utils.cartridge_quick_switch import QUICK_SWITCH_STABLE_FRAMES
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -210,7 +210,7 @@ class SquareGoddessEntryTest(unittest.TestCase):
         )
         self.assertIsNone(QUICK_SWITCH_TEMPLATE.candidate_center_roi)
 
-    def test_quick_switch_click_uses_one_second_stable_center(self):
+    def test_quick_switch_click_uses_two_frame_stable_center(self):
         task = object.__new__(SquareGoddessTask)
         task.config = {}
         task.info_set = lambda *_args, **_kwargs: None
@@ -241,7 +241,8 @@ class SquareGoddessEntryTest(unittest.TestCase):
             )
         )
         self.assertEqual([(792, 990, 1920, 1080, 0.0)], clicks)
-        self.assertEqual(STABLE_WINDOW - 1, len(sleeps))
+        # Two agreeing frames, one sample after the first (Leo 10-11).
+        self.assertEqual(QUICK_SWITCH_STABLE_FRAMES - 1, len(sleeps))
         self.assertTrue(all(seconds == 0.1 for seconds in sleeps))
 
     def test_masked_match_ignores_non_finite_scores_from_black_regions(self):
@@ -724,6 +725,134 @@ class SquareGoddessEntryTest(unittest.TestCase):
         task.operate_click = lambda *args, **kwargs: self.fail("No fixed click")
         with patch("src.tasks.SquareGoddessTask.monotonic", side_effect=[0, 0, 2]):
             self.assertFalse(task._wait_for_goddess_prayer_completion(timeout=1))
+
+
+class StuckGoddessWalkTest(unittest.TestCase):
+    """Player report 2026-10-11: the walk to the goddess stopped on the way
+    with "自动移动中" still up and the home button hidden."""
+
+    BANNER = "自动移动中：艾力克史温女神像"
+    CANCEL = (960 / REFERENCE_WIDTH, 985 / REFERENCE_HEIGHT)
+
+    def _task(self, screens):
+        """``screens`` yields the full-frame text of each look, in order."""
+        task = object.__new__(SquareGoddessTask)
+        task.config = {"女神像导航入口等待秒数": 8.0}
+        task.info_set = lambda *args: None
+        logs = []
+        task.log_info = logs.append
+        clock = [0.0]
+
+        def sleep(seconds=0, *args):
+            clock[0] += max(float(seconds), 0.5)
+
+        task.sleep = sleep
+        task.capture_frame = lambda: np.zeros((1080, 1920, 3), dtype=np.uint8)
+        state = {"text": ""}
+
+        def look(*args, **kwargs):
+            state["text"] = next(screens, state["text"])
+            return state["text"]
+
+        task._ocr_text = lambda frame, name, **kwargs: look()
+
+        def prayer(frame, patterns, name, roi=None):
+            text = look()
+            if "许愿" in text and "移动中" not in text:
+                return (1410, 880), text
+            return None, text
+
+        task._ocr_pattern_click_point = prayer
+        clicks = []
+        task.operate_click = lambda x, y, **kwargs: clicks.append((x, y))
+        task._click_client = lambda *args, **kwargs: clicks.append(args[:2])
+        navigations = []
+        task._click_goddess_daily_navigation_until = (
+            lambda timeout: navigations.append(timeout) or GODDESS_NAVIGATION_CLICKED
+        )
+        return task, clock, clicks, navigations, logs
+
+    def _run(self, task, clock, timeout=90):
+        with patch("src.tasks.SquareGoddessTask.monotonic", side_effect=lambda: clock[0]):
+            return task._wait_for_goddess_prayer_completion(timeout=timeout)
+
+    def test_a_stuck_walk_is_stopped_and_the_navigation_pressed_again(self):
+        # 25 looks of the banner (12 s), then the ✕ works and the prompt shows.
+        screens = iter([self.BANNER] * 45 + ["", "", "", "向女神像许愿"])
+        task, clock, clicks, navigations, logs = self._task(screens)
+        task._wait_for_daily_navigation_to_disappear = lambda **kwargs: True
+        self.assertTrue(self._run(task, clock))
+        self.assertIn(self.CANCEL, clicks)
+        self.assertEqual([8.0], navigations)
+        self.assertEqual((1410, 880), clicks[-1])
+        self.assertTrue(any("停在半路超过20秒" in line for line in logs))
+
+    def test_a_walk_stuck_every_time_ends_with_the_walk_stopped(self):
+        # The banner goes when ✕ is pressed and comes back with each navigation.
+        task, clock, clicks, navigations, logs = self._task(iter(()))
+        walking = {"on": True}
+        task._ocr_text = lambda frame, name, **kwargs: self.BANNER if walking["on"] else ""
+        task._ocr_pattern_click_point = (
+            lambda *args, **kwargs: (None, self.BANNER if walking["on"] else "")
+        )
+
+        def press(x, y, **kwargs):
+            clicks.append((x, y))
+            walking["on"] = False
+
+        task.operate_click = press
+
+        def navigate(timeout):
+            navigations.append(timeout)
+            walking["on"] = True
+            return GODDESS_NAVIGATION_CLICKED
+
+        task._click_goddess_daily_navigation_until = navigate
+        self.assertFalse(self._run(task, clock))
+        self.assertEqual(2, len(navigations))
+        self.assertEqual([self.CANCEL] * 3, clicks)
+        self.assertFalse(walking["on"])
+        self.assertIn("这次没有许愿", logs[-1])
+
+    def test_a_short_walk_is_left_alone(self):
+        screens = iter([self.BANNER] * 10 + ["", "向女神像许愿"])
+        task, clock, clicks, navigations, logs = self._task(screens)
+        task._wait_for_daily_navigation_to_disappear = lambda **kwargs: True
+        self.assertTrue(self._run(task, clock))
+        self.assertEqual([(1410, 880)], clicks)
+        self.assertEqual([], navigations)
+
+    def test_the_cross_is_pressed_only_while_two_looks_show_the_banner(self):
+        for screens, pressed in (
+            ([self.BANNER, ""], False),
+            (["", self.BANNER], False),
+            ([self.BANNER, self.BANNER, "", "", ""], True),
+        ):
+            with self.subTest(screens=screens):
+                task, clock, clicks, _navigations, _logs = self._task(iter(screens))
+                task._cancel_goddess_walk()
+                self.assertEqual([self.CANCEL] if pressed else [], clicks)
+
+    def test_a_timeout_stops_a_walk_still_under_way(self):
+        task, clock, clicks, _navigations, _logs = self._task(iter(()))
+        task.config["女神像寻路卡住秒数"] = 1000.0
+        task._ocr_text = lambda frame, name, **kwargs: self.BANNER
+        task._ocr_pattern_click_point = lambda *args, **kwargs: (None, self.BANNER)
+        self.assertFalse(self._run(task, clock, timeout=30))
+        self.assertIn(self.CANCEL, clicks)
+
+    def test_a_banner_naming_the_wish_is_not_the_prompt(self):
+        task = object.__new__(SquareGoddessTask)
+        boxes = [
+            SimpleNamespace(name="自动移动中：向女神像许愿", x=800, y=950, width=300, height=30)
+        ]
+        task._ocr_boxes = lambda *args, **kwargs: boxes
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        point, _text = task._ocr_pattern_click_point(frame, ["许愿"], name="女神像许愿")
+        self.assertIsNone(point)
+        boxes.append(SimpleNamespace(name="向女神像许愿", x=1300, y=860, width=200, height=40))
+        point, _text = task._ocr_pattern_click_point(frame, ["许愿"], name="女神像许愿")
+        self.assertEqual((1400, 880), point)
 
 
 if __name__ == "__main__":

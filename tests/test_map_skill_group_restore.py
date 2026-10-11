@@ -138,6 +138,15 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(2, game.group)
         self.assertEqual(1, collector.skill_group_keeper.before)
 
+    def test_no_skill_bar_on_screen_presses_no_group_button(self):
+        # Clone 10-11: inside a shop (Q_ep2 雷瓦汀据点) the whole bar was gone
+        # and the three group presses landed on the shop.
+        game, collector = _collector(None)
+        self.assertFalse(collector._open_skill_menu((SEARCH_ICON,), allow_group_one_recovery=True))
+        self.assertEqual([], game.clicks)
+        self.assertFalse(collector.skill_group_keeper.switched)
+        self.assertIn("画面上没有技能栏", game.logs[-1][1])
+
     def test_a_shown_skill_bar_switches_nothing(self):
         game, collector = _collector(2)
         self.assertTrue(collector._open_skill_menu((SEARCH_ICON,), allow_group_one_recovery=True))

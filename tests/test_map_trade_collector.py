@@ -702,6 +702,12 @@ class CollectionRunTest(unittest.TestCase):
             self.assertEqual([], selected)
 
 
+# The group search presses group buttons only where the skill bar is seen.
+BAR_SHOWN = patch(
+    "src.tasks.map_trade.collector_skills.selected_skill_group", new=lambda _frame: 1
+)
+
+
 class CollectorSkillTest(unittest.TestCase):
     @staticmethod
     def _skill_collector(states, counts):
@@ -1603,6 +1609,7 @@ class CollectorSkillTest(unittest.TestCase):
             ocr_calls,
         )
 
+    @BAR_SHOWN
     def test_skill_menu_recovery_clicks_group_one_and_retries_icon_detection(self):
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
         group_clicks = []
@@ -1656,6 +1663,7 @@ class CollectorSkillTest(unittest.TestCase):
         self.assertEqual([(available.match.center, frame.shape, 0.0)], action_clicks)
         self.assertEqual(SEARCH_COUNTDOWN_RELATIVE_ROI, result.relative_roi)
 
+    @BAR_SHOWN
     def test_skill_menu_recovery_fails_after_one_group_one_click(self):
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
         clicks = []
@@ -1693,6 +1701,7 @@ class CollectorSkillTest(unittest.TestCase):
         self.assertFalse(result.completed)
         self.assertIn("未确认采集技能栏", result.message)
 
+    @BAR_SHOWN
     def test_skill_menu_stops_on_the_group_that_shows_the_icons(self):
         # User 2026-09-28: cooking in group 1, 探查/吸收/召集/压制 in group 2.
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
@@ -1731,6 +1740,7 @@ class CollectorSkillTest(unittest.TestCase):
         self.assertTrue(collector._open_skill_menu((ABSORB_ICON,), allow_group_one_recovery=True))
         self.assertEqual(2, len(clicks))  # group 1, then group 2
 
+    @BAR_SHOWN
     def test_start_search_recovers_group_one_once_then_fails(self):
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
         clicks = []

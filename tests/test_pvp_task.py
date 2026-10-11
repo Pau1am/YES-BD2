@@ -1,6 +1,6 @@
 import unittest
 
-from src.utils.image_utils import STABLE_MATCH_WINDOW_SAMPLES as STABLE_WINDOW
+from src.utils.cartridge_quick_switch import QUICK_SWITCH_STABLE_FRAMES
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,8 +71,6 @@ from src.utils.cartridge_quick_switch import (
     BATTLE_GAMEPLAY_CATEGORY_HIGHLIGHT_REGION,
     BATTLE_GAMEPLAY_CATEGORY_LABEL,
     BATTLE_GAMEPLAY_CATEGORY_OCR_ROI,
-    BATTLE_GAMEPLAY_CATEGORY_POINT,
-    FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS,
     GAMEPLAY_CATEGORY_HIGHLIGHT_MIN_RATIO,
 )
 from src.utils.image_utils import candidate_scales
@@ -398,7 +396,8 @@ class PVPTaskHelperTest(unittest.TestCase):
             )
         )
         self.assertEqual([(852, 991, 1920, 1080, 0.0)], clicks)
-        self.assertEqual(STABLE_WINDOW - 1, len(sleeps))
+        # Two agreeing frames, one sample after the first (Leo 10-11).
+        self.assertEqual(QUICK_SWITCH_STABLE_FRAMES - 1, len(sleeps))
         self.assertTrue(all(seconds == 0.1 for seconds in sleeps))
 
     def test_template_click_scales_reference_offset_with_client_resolution(self):
@@ -1390,108 +1389,6 @@ class PVPTaskHelperTest(unittest.TestCase):
         for spec in specs:
             self.assertTrue(spec.file_name.startswith("image/"), spec.file_name)
             self.assertTrue((template_root / spec.file_name).is_file(), spec.file_name)
-
-    def test_pvp_entry_clicks_battle_gameplay_then_fixed_first_slot(self):
-        task = object.__new__(PVPTask)
-        task.info_set = lambda *_args, **_kwargs: None
-        task.log_info = lambda *_args, **_kwargs: None
-        task.open_cartridge_quick_switcher = lambda **_kwargs: True
-        clicks = []
-        sleeps = []
-        task.operate_click = lambda x, y, after_sleep=0: clicks.append((x, y, after_sleep))
-        task.sleep = lambda seconds: sleeps.append(seconds)
-        task._click_template_until = lambda *_args, **_kwargs: self.fail(
-            "fixed PVP slot selection must not use template matching"
-        )
-        task._wait_for_battle_gameplay_category = lambda: True
-        task._quick_switch_still_shows = lambda **_kwargs: False
-        hub_waits = []
-        task._wait_for_pvp_hub_after_cart = lambda timeout: hub_waits.append(timeout) or True
-        task._clear_pvp_hub_notice_if_present = lambda: None
-        task.config = {}
-
-        self.assertTrue(PVPTask._enter_pvp_from_home(task))
-        self.assertEqual(
-            [0.5, FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS],
-            sleeps,
-        )
-        self.assertEqual(
-            [
-                (*BATTLE_GAMEPLAY_CATEGORY_POINT, 0.0),
-                (*PVP_CARTRIDGE_SLOT_POINT, 0.0),
-            ],
-            clicks,
-        )
-        self.assertEqual([30.0], hub_waits)
-
-    def test_pvp_entry_stops_when_hub_is_not_confirmed(self):
-        task = object.__new__(PVPTask)
-        task.info_set = lambda *_args, **_kwargs: None
-        task.log_info = lambda *_args, **_kwargs: None
-        task.open_cartridge_quick_switcher = lambda **_kwargs: True
-        task.sleep = lambda *_args, **_kwargs: None
-        task._wait_for_battle_gameplay_category = lambda: True
-        task._quick_switch_still_shows = lambda **_kwargs: False
-        clicks = []
-        task.operate_click = lambda x, y, after_sleep=0: clicks.append((x, y, after_sleep))
-        task._wait_for_pvp_hub_after_cart = lambda *_args, **_kwargs: False
-        task._clear_pvp_hub_notice_if_present = lambda: self.fail(
-            "hub notice must not be checked before the PVP hub is confirmed"
-        )
-        task.config = {}
-
-        self.assertFalse(PVPTask._enter_pvp_from_home(task))
-        self.assertEqual(
-            [
-                (*BATTLE_GAMEPLAY_CATEGORY_POINT, 0.0),
-                (*PVP_CARTRIDGE_SLOT_POINT, 0.0),
-            ],
-            clicks,
-        )
-
-    def test_pvp_entry_stops_before_slot_when_battle_category_is_not_confirmed(self):
-        task = object.__new__(PVPTask)
-        task.info_set = lambda *_args, **_kwargs: None
-        task.log_info = lambda *_args, **_kwargs: None
-        task.open_cartridge_quick_switcher = lambda **_kwargs: True
-        task.sleep = lambda *_args, **_kwargs: None
-        task._wait_for_battle_gameplay_category = lambda: False
-        task._quick_switch_still_shows = lambda **_kwargs: False
-        clicks = []
-        task.operate_click = lambda x, y, after_sleep=0: clicks.append(
-            (x, y, after_sleep)
-        )
-        task._wait_for_pvp_hub_after_cart = lambda *_args, **_kwargs: self.fail(
-            "PVP slot must not be clicked before the battle category is confirmed"
-        )
-        task.config = {}
-
-        self.assertFalse(PVPTask._enter_pvp_from_home(task))
-        self.assertEqual([(*BATTLE_GAMEPLAY_CATEGORY_POINT, 0.0)], clicks)
-
-    def test_pvp_entry_reclicks_only_while_switch_page_still_shown(self):
-        # Swallowed clicks leave the switch page as it was: re-click the
-        # category while it is still unlit, the slot while the page stays.
-        task = object.__new__(PVPTask)
-        task.info_set = lambda *_args, **_kwargs: None
-        task.log_info = lambda *_args, **_kwargs: None
-        task.open_cartridge_quick_switcher = lambda **_kwargs: True
-        task.sleep = lambda *_args, **_kwargs: None
-        category = iter([False, True])
-        task._wait_for_battle_gameplay_category = lambda: next(category)
-        still = {False: iter([True]), True: iter([True, False])}
-        task._quick_switch_still_shows = lambda highlighted, seconds: next(still[highlighted])
-        clicks = []
-        task.operate_click = lambda x, y, after_sleep=0: clicks.append((x, y))
-        task._wait_for_pvp_hub_after_cart = lambda *_args, **_kwargs: True
-        task._clear_pvp_hub_notice_if_present = lambda: None
-        task.config = {}
-
-        self.assertTrue(PVPTask._enter_pvp_from_home(task))
-        self.assertEqual(
-            [BATTLE_GAMEPLAY_CATEGORY_POINT] * 2 + [PVP_CARTRIDGE_SLOT_POINT] * 2,
-            clicks,
-        )
 
     def test_quick_switch_still_shows_needs_two_frames(self):
         task = object.__new__(PVPTask)
@@ -3216,6 +3113,10 @@ class PVPTaskHelperTest(unittest.TestCase):
         task._click_ocr_pattern_center = lambda *_args, **_kwargs: False
         task._multiplier_matches = (
             lambda multiplier, timeout=2.0: state["main"] == multiplier
+        )
+        # 战斗开始 shows the main popup's multiplier as the cost of one battle.
+        task._start_cost_is = lambda multiplier: (
+            not state["dialog_open"] and state["main"] == multiplier
         )
         task._setting_multiplier_matches = (
             lambda multiplier: state["dialog_open"] and state["setting"] == multiplier

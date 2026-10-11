@@ -124,6 +124,7 @@ class PassListTest(unittest.TestCase):
         task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
         task.capture_frame = lambda: np.zeros((1080, 1920, 3), dtype=np.uint8)
+        task.sleep = lambda *_args: None
         rois = []
         # The earlier scan read the caption with a stray character, so the
         # card is found by its position; the purchase box must not count.
@@ -148,13 +149,16 @@ class PassListTest(unittest.TestCase):
             ),
         )
         self.assertEqual(["活动通行证"], clicked)
-        self.assertEqual([PASS_LIST_EXTENDED_ROI], rois)
+        # The caption is looked for again (slow PCs) before falling back.
+        self.assertEqual({PASS_LIST_EXTENDED_ROI}, set(rois))
+        self.assertGreater(len(rois), 1)
 
     def test_claim_one_pass_without_card_does_not_click(self):
         task = object.__new__(PassRewardTask)
         task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
         task.capture_frame = lambda: np.zeros((1080, 1920, 3), dtype=np.uint8)
+        task.sleep = lambda *_args: None  # the list is looked at again for 2 s
         task._roi_boxes = lambda *_args: [box("购买通行证")]
         task._click_box = lambda *_args, **_kwargs: self.fail("must not click")
         task._click_reference = lambda *_args, **_kwargs: self.fail("must not click")
@@ -167,6 +171,7 @@ class PassListTest(unittest.TestCase):
         task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
         task._save_flow_diagnostic = lambda *_args: None
+        task.sleep = lambda *_args: None
         task.capture_frame = lambda: np.zeros((1080, 1920, 3), dtype=np.uint8)
         task._roi_boxes = lambda *_args: [box("基础通行证", 300), box("角色通行证", 410)]
         task._click_box = lambda *_args, **_kwargs: None

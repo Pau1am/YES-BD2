@@ -94,6 +94,13 @@ config = {
             "auto_simplify": True,
             "params": {
                 "use_openvino": True,
+                # ok-script turns the NPU on when it is left out.  On an
+                # Intel NPU onnxocr reads every box at one fixed input size,
+                # and small title/value boxes can read nothing: a player's
+                # 跑商 title (v0.1.21 2026-10-11, read 「-」) reads nothing at
+                # that size and 「购买」 on the CPU.  Every PC reads as the
+                # tests do.
+                "use_npu": False,
                 # ok-script forwards only use_openvino/use_npu here;
                 # onnxocr 0.0.22 therefore keeps its safe AsyncInferQueue default (1).
             },
