@@ -136,6 +136,66 @@ class ClaimAllConfirmTest(unittest.TestCase):
         self.assertEqual(1, game["presses"])
 
 
+class SettleEscapeTest(unittest.TestCase):
+    """Player 2026-10-12 (特别赛季通行证, 2560x1440 window): after the first
+    claim an overlay stayed through three blank-space taps and the run
+    stopped.  Leo 「關不掉 就按ESC做備案」: one Esc after the taps."""
+
+    def _task(self, closes_on_escape):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from src.tasks import claim_page
+
+        clock = [0.0]
+        patcher = patch.object(claim_page, "monotonic", lambda: clock[0])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        state = {"overlay": True}
+        presses = []
+
+        def sleep(seconds=0.0):
+            clock[0] += max(seconds, 0.3)
+
+        def tap_escape(after_sleep=0.0):
+            presses.append("esc")
+            if closes_on_escape:
+                state["overlay"] = False
+            sleep(after_sleep)
+            return True
+
+        task = SimpleNamespace(
+            config={},
+            info_set=lambda *a, **k: None,
+            log_info=lambda *a, **k: None,
+            capture_frame=lambda: None,
+            _roi_boxes=lambda *a, **k: [],
+            _boxes_text=lambda boxes: "",
+            _box_with=lambda boxes, keywords: None,
+            _frame_brightness=lambda frame: 20.0 if state["overlay"] else 80.0,
+            _title_visible=lambda *a: not state["overlay"],
+            _click_reference=lambda *a, **k: (
+                presses.append("tap") or sleep(k.get("after_sleep", 0))
+            ),
+            sleep=sleep,
+            tap_escape=tap_escape,
+            _note_why=lambda *a: None,
+            _save_flow_diagnostic=lambda *a: None,
+            claim_log_name="pass",
+        )
+        return task, presses
+
+    def test_an_overlay_the_taps_leave_is_closed_by_escape(self):
+        task, presses = self._task(closes_on_escape=True)
+        self.assertTrue(ClaimPageMixin._settle_after_claim(task, "通行证", ("通行证",), 80.0))
+        self.assertEqual(["tap", "tap", "tap", "esc"], presses)
+
+    def test_escape_is_pressed_once_only(self):
+        task, presses = self._task(closes_on_escape=False)
+        self.assertFalse(ClaimPageMixin._settle_after_claim(task, "通行证", ("通行证",), 80.0))
+        self.assertEqual(1, presses.count("esc"))
+
+
 if __name__ == "__main__":
     unittest.main()
 

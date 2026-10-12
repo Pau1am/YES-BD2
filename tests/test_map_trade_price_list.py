@@ -1,6 +1,7 @@
 """The 价目表 (owned only) tells which planned items are worth a shop visit."""
 
 import unittest
+from unittest import mock
 from types import SimpleNamespace
 
 from src.tasks.map_trade.models import CalendarEntry
@@ -145,3 +146,76 @@ class KnownGoodsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PagingTest(unittest.TestCase):
+    """The list glides on after a drag (Leo's 2K PC, 2026-10-12): a row
+    skipped between two pages was taken as "not in the bag" and never sold."""
+
+    ROWS = [
+        ("卢戈山参烤串", True),
+        ("钢铁块", True),
+        ("普通布料", True),
+        ("泥炭", True),
+        ("巧克力", True),
+        ("冰镇甜点", False),
+        ("芥末", False),
+    ]
+
+    def _reader(self, forward_rows, back_rows=2):
+        from src.tasks.map_trade.trader_price_list import PriceListMixin
+
+        state = SimpleNamespace(top=0, drags=[])
+        reader = object.__new__(PriceListMixin)
+        logs = []
+        reader.task = SimpleNamespace(
+            log_warning=logs.append, operate_click=lambda *a, **k: None
+        )
+        reader._status = lambda *args: None
+        reader._open_price_list = lambda: True
+        reader._close_price_list = lambda: True
+        reader._ticked_within = lambda seconds: True
+
+        def settled():
+            return list(self.ROWS[state.top : state.top + 4])
+
+        def drag(back=False):
+            state.drags.append("back" if back else "down")
+            step = -back_rows if back else forward_rows
+            state.top = max(0, min(len(self.ROWS) - 1, state.top + step))
+            return True
+
+        reader._settled_rows = settled
+        reader._drag_price_list = drag
+        return reader, state, logs
+
+    def test_a_drag_that_overshoots_a_row_is_taken_back(self):
+        reader, state, _ = self._reader(forward_rows=5)
+        found = reader.owned_items_at_max_rate()
+        self.assertIn("巧克力", found)
+        self.assertEqual(["down", "back"], state.drags)
+
+    def test_pages_sharing_a_row_need_no_drag_back(self):
+        reader, state, _ = self._reader(forward_rows=3)
+        found = reader.owned_items_at_max_rate()
+        self.assertEqual({"卢戈山参烤串", "钢铁块", "普通布料", "泥炭", "巧克力"}, found)
+        self.assertEqual(["down"], state.drags)
+
+    def test_a_gap_that_stays_falls_back_to_the_shop_search(self):
+        reader, _, logs = self._reader(forward_rows=6, back_rows=1)
+        self.assertIsNone(reader.owned_items_at_max_rate())
+        self.assertTrue(any("漏看" in message for message in logs))
+
+    def test_still_all_at_120_on_the_last_page_falls_back(self):
+        from src.tasks.map_trade import trader_price_list
+
+        reader, _, logs = self._reader(forward_rows=1)
+        with mock.patch.object(trader_price_list, "PRICE_LIST_MAX_PAGES", 2):
+            self.assertIsNone(reader.owned_items_at_max_rate())
+        self.assertTrue(any("没看完" in message for message in logs))
+
+    def test_an_empty_page_after_a_drag_falls_back(self):
+        reader, state, logs = self._reader(forward_rows=3)
+        reader._settled_rows = lambda: [] if state.drags else list(self.ROWS[:4])
+        self.assertIsNone(reader.owned_items_at_max_rate())
+        self.assertTrue(any("没读到内容" in message for message in logs))

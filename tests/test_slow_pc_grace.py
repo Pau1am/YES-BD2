@@ -58,6 +58,8 @@ class JunkDetailTest(unittest.TestCase):
         task.clock = Clock()
         task.sleep = task.clock.sleep
         task._click_reference = lambda *a, **k: None
+        # No frame: the detail ✕ is pressed at its usual place.
+        task.capture_frame = lambda: None
         # The SR filter shows an unlocked, unworn SR item: it is opened.
         task._grid_rarity = lambda frame, cell: "SR"
         task._badged_cells = lambda: set()

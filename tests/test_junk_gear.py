@@ -582,6 +582,8 @@ class GridShortcutTest(unittest.TestCase):
         task.log_warning = lambda *a, **k: None
         task.clicks = []
         task._click_reference = lambda x, y, after_sleep=0: task.clicks.append((x, y))
+        # No frame: the ✕ is pressed at its usual place.
+        task.capture_frame = lambda: None
         return task
 
     def test_locked_cell_is_never_clicked_or_dismantled(self):
@@ -828,15 +830,21 @@ class DetailPressTest(unittest.TestCase):
 
     def _task(self, opens_on, closes_on):
         """The popup opens on the ``opens_on``-th cell click and closes on the
-        ``closes_on``-th ✕ click (0: never)."""
+        ``closes_on``-th ✕, blank-space or Esc press (0: never)."""
         from unittest import mock
 
-        from src.tasks.JunkGearTask import DETAIL_CLOSE_POINT, JunkGearTask
+        from src.tasks.JunkGearTask import (
+            DETAIL_BLANK_TAP_POINT,
+            DETAIL_CLOSE_POINT,
+            JunkGearTask,
+        )
 
         task = object.__new__(JunkGearTask)
         task.config = {}
         task.info_set = lambda *a: None
         task.log_info = lambda *a, **k: None
+        # No frame: the ✕ is pressed at its usual place.
+        task.capture_frame = lambda: None
         task.warnings = []
         task.log_warning = lambda message, **k: task.warnings.append(message)
         task.sleep = _fake_press_clock(self)
@@ -844,7 +852,7 @@ class DetailPressTest(unittest.TestCase):
         state = {"open": False}
 
         def click(x, y, after_sleep=0):
-            if (x, y) == DETAIL_CLOSE_POINT:
+            if (x, y) in (DETAIL_CLOSE_POINT, DETAIL_BLANK_TAP_POINT, ("Esc", None)):
                 task.close_clicks.append((x, y))
                 if len(task.close_clicks) == closes_on:
                     state["open"] = False
@@ -854,6 +862,12 @@ class DetailPressTest(unittest.TestCase):
                     state["open"] = True
 
         task._click_reference = click
+
+        def escape(after_sleep=0):
+            click("Esc", None)
+            return True
+
+        task.tap_escape = escape
         task._wait_detail = lambda open_, timeout=0: state["open"] == open_
         # A real 3★ exclusive with its owner line: only the clicks are tested.
         task._read_detail = lambda: (
@@ -890,9 +904,24 @@ class DetailPressTest(unittest.TestCase):
     def test_a_popup_that_never_closes_is_a_failure(self):
         task = self._task(opens_on=1, closes_on=0)
         self.assertIsNone(self._classify([(0, 0), (0, 1)], task))
-        # Two ✕ presses at most, and the next item is never clicked.
-        self.assertEqual(2, len(task.close_clicks))
+        # Two ✕ presses, two blank-space taps and two Esc at most, and the
+        # next item is never clicked.
+        from src.tasks.JunkGearTask import DETAIL_BLANK_TAP_POINT, DETAIL_CLOSE_POINT
+
+        self.assertEqual(
+            [DETAIL_CLOSE_POINT] * 2 + [DETAIL_BLANK_TAP_POINT] * 2 + [("Esc", None)] * 2,
+            task.close_clicks,
+        )
         self.assertEqual(1, len(task.cell_clicks))
+
+    def test_a_close_lost_on_the_x_is_done_by_a_blank_space_tap(self):
+        # Player 2026-10-12: two ✕ presses showed nothing (the ✕ of a taller
+        # popup was elsewhere); Leo 「點空白處也可以關」.
+        from src.tasks.JunkGearTask import DETAIL_BLANK_TAP_POINT
+
+        task = self._task(opens_on=1, closes_on=3)
+        self.assertEqual([(0, 0)], self._classify([(0, 0)], task))
+        self.assertEqual(DETAIL_BLANK_TAP_POINT, task.close_clicks[-1])
 
 
 class SortLabelTest(unittest.TestCase):

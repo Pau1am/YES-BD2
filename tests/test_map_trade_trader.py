@@ -833,6 +833,49 @@ class SellFlowTest(unittest.TestCase):
             [], trader._locate_sale_items(CalendarEntry("黄金罗勒", "S6:异教塔"), frame)
         )
 
+    def _no_page_box_trader(self, crop_reads):
+        # Leo's 2K PC 2026-10-12, 卢戈山参烤串: badge at pixel 0.923 (strict
+        # floor 0.93) and the page OCR put no box on it at all.
+        frame = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        page = [self._text_box("卢戈山参烤串", 795, 246, 168, 34)]
+        marker = MatchResult(0.981, (657, 252), (70, 19), pixel_score=0.923)
+        crop_calls = []
+
+        def ocr_boxes(_frame, name, target_height=900, ocr_scale=1.0):
+            if name == "出售↑120%标志":
+                crop_calls.append(ocr_scale)
+                text = crop_reads.get(ocr_scale, "")
+                return [self._text_box(text, 10, 10, 60, 20)] if text else []
+            return page
+
+        trader, match_calls = self._make_sale_template_trader(ocr_boxes, ())
+
+        def match_all(frame, spec, **kwargs):
+            match_calls.append((frame, spec, kwargs))
+            return (marker,) if spec.min_pixel_score == SALE_MARKER_RELAXED_PIXEL_SCORE else ()
+
+        trader.vision.match_all = match_all
+        return trader, frame, crop_calls
+
+    def test_badge_with_no_page_box_is_read_alone_enlarged(self):
+        trader, frame, crop_calls = self._no_page_box_trader({3.0: "4120%"})
+        found = trader._locate_sale_items(CalendarEntry("卢戈山参烤串", "S14:x"), frame)
+        self.assertEqual(1, len(found))
+        self.assertEqual([2.0, 3.0], crop_calls)
+
+    def test_badge_read_alone_as_another_rate_is_refused(self):
+        trader, frame, crop_calls = self._no_page_box_trader({2.0: "4116%", 3.0: "120"})
+        self.assertEqual(
+            [], trader._locate_sale_items(CalendarEntry("卢戈山参烤串", "S14:x"), frame)
+        )
+        self.assertEqual([2.0], crop_calls)
+
+    def test_badge_that_reads_nothing_alone_is_not_a_marker(self):
+        trader, frame, _ = self._no_page_box_trader({})
+        self.assertEqual(
+            [], trader._locate_sale_items(CalendarEntry("卢戈山参烤串", "S14:x"), frame)
+        )
+
     def test_locate_sale_items_with_no_ocr_output_is_not_marked_sold_out(self):
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
         target_heights = []

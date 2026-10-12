@@ -95,6 +95,7 @@ class OlderCellsTest(unittest.TestCase):
         task._wait_detail = lambda *a, **k: True
         task.press_and_confirm = lambda label, do, confirmed, **k: do() or True
         task._click_reference = lambda *a, **k: None
+        task.capture_frame = lambda: None
         # Leo's real r2c3: 猎人之弓 SR, 莉兹内's (3★) exclusive (4K 2026-10-11).
         task._read_detail = lambda: (
             GearItem("猎人之弓", "SR", False, False, False, owner_line="莉兹内"), "专用装备"
