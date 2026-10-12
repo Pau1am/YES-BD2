@@ -10,3 +10,10 @@ the template asset.
 same kind of strip-only canvas for the live PVP-hub top bar whose whole bar sat
 about 4 px higher than calibration. Only the medal-template search strip
 `(793, 29, 340, 55)` is retained.
+
+`home_bright_skin_cues_fhd.png` (2026-10-12 player report, v0.1.24) is a
+player's 主页 with a bright angel skin, rebuilt from the 问题摘要 screenshot.
+Only the 主页 checks' boxes are kept: the left icon column
+`(110, 165, 430, 155)`, the 抽抽乐 label `(110, 993, 95, 54)` and the medal
+strip `(793, 29, 340, 55)`, where a soft glow passed as the medal once its
+contrast was stretched up to the template's.

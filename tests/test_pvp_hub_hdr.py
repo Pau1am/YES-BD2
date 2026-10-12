@@ -21,6 +21,11 @@ import numpy as np
 
 from src.tasks.PVPTask import PVP_MEDALS_TEMPLATE, PVPTask
 
+try:
+    from onnxocr.onnx_paddleocr import ONNXPaddleOcr
+except ImportError:  # pragma: no cover - the tool always ships onnxocr
+    ONNXPaddleOcr = None
+
 FIXTURES = Path(__file__).parent / "fixtures" / "pvp"
 
 
@@ -75,6 +80,57 @@ class HubMedalBrightnessTest(unittest.TestCase):
     def test_an_empty_bar_is_not_the_hub(self):
         self.assertFalse(self._hub(np.zeros((1080, 1920, 3), np.uint8)))
 
+    def test_a_bright_home_glow_is_not_the_hub(self):
+        # Player 2026-10-12 (v0.1.24, 1080p window, HDR off): 一键日常 went
+        # from 女神像 straight to 镜中之战 on 主页, took the soft white glow
+        # of the home art for the medal and searched 30 s for the stage
+        # instead of opening 游戏卡珍藏集.  Its shape scores 0.86 and, with
+        # the contrast stretched up to the medal's, its pixels pass 0.88.
+        from src.tasks.PVPTask import TEMPLATE_DIR
+        from src.utils import image_utils, task_vision
+
+        frame = _strip("home_bright_skin_cues_fhd.png")
+        self.assertFalse(self._hub(frame))
+        loose = _task()._match(
+            frame, replace(PVP_MEDALS_TEMPLATE, min_pixel_score=0.0, brightness_tolerant=False)
+        )
+        self.assertGreater(loose.score, PVP_MEDALS_TEMPLATE.default_threshold)
+        template, mask = task_vision.load_template(TEMPLATE_DIR, PVP_MEDALS_TEMPLATE, cache={})
+        (x, y), (width, height) = loose.position, loose.size
+        similarity, _ratio, contrast = image_utils.brightness_matched_similarity(
+            image_utils.to_gray(frame)[y : y + height, x : x + width],
+            cv2.resize(template, (width, height), interpolation=cv2.INTER_AREA),
+            None
+            if mask is None
+            else cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST),
+        )
+        self.assertGreaterEqual(similarity, PVP_MEDALS_TEMPLATE.min_pixel_score)
+        self.assertLess(contrast, task_vision.BRIGHTNESS_SHIFT_MIN_CONTRAST)
+
+
+
+@unittest.skipIf(ONNXPaddleOcr is None, "onnxocr not installed")
+class BrightHomeSkinTest(unittest.TestCase):
+    def test_the_players_home_is_read_as_home_and_the_cartridge_opened(self):
+        engine = ONNXPaddleOcr(use_angle_cls=False, use_openvino=True)
+
+        def ocr(frame, name, roi=None, ocr_scale=1.0):
+            x, y, width, height = roi
+            crop = frame[y : y + height, x : x + width]
+            if ocr_scale != 1.0:
+                crop = cv2.resize(crop, None, fx=ocr_scale, fy=ocr_scale)
+            return " ".join(text for _points, (text, _score) in engine.ocr(crop)[0] or [])
+
+        frame = _strip("home_bright_skin_cues_fhd.png")
+        task = _task()
+        task._ocr_text = ocr
+        task.capture_frame = lambda: frame
+        self.assertTrue(task._home_confirmation_signals(frame)[0])
+        task._wait_for_template = lambda *_args, **_kwargs: self.fail("medal asked on 主页")
+        entered = []
+        task._enter_pvp_from_home = lambda: entered.append(True) or True
+        self.assertTrue(task._ensure_pvp_hub())
+        self.assertEqual([True], entered)
 
 
 class SquareQuickSwitchBrightnessTest(unittest.TestCase):

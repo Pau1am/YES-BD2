@@ -2117,6 +2117,8 @@ class PVPTaskHelperTest(unittest.TestCase):
     def test_ensure_pvp_hub_clears_notice_when_already_in_hub(self):
         task = object.__new__(PVPTask)
         task.info_set = lambda *_args, **_kwargs: None
+        task.capture_frame = lambda: None
+        task._home_confirmation_signals = lambda _frame: (False, 0, 0.0, "")
         cleared = []
 
         task._wait_for_template = lambda *_args, **_kwargs: True
@@ -2125,6 +2127,20 @@ class PVPTaskHelperTest(unittest.TestCase):
 
         self.assertTrue(PVPTask._ensure_pvp_hub(task))
         self.assertEqual([True], cleared)
+
+    def test_ensure_pvp_hub_on_home_goes_through_the_collection(self):
+        # Player 2026-10-12: a bright 主页 skin passed as the hub medal, so
+        # the cartridge was never opened.  On 主页 the medal is not asked.
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        task.capture_frame = lambda: None
+        task._home_confirmation_signals = lambda _frame: (True, 3, 250.0, "抽抽乐")
+        task._wait_for_template = lambda *_args, **_kwargs: self.fail("medal asked on 主页")
+        entered = []
+        task._enter_pvp_from_home = lambda: entered.append(True) or True
+
+        self.assertTrue(PVPTask._ensure_pvp_hub(task))
+        self.assertEqual([True], entered)
 
     def test_return_home_from_pvp_hub_clicks_top_right_home_and_checks_home(self):
         task = object.__new__(PVPTask)
@@ -2819,6 +2835,7 @@ class PVPTaskHelperTest(unittest.TestCase):
         task.log_warning = lambda *_args, **_kwargs: None
         task._click_template_until = lambda *_args, **_kwargs: True
         task._wait_for_ocr_patterns = lambda *_args, **_kwargs: (False, "2 0")
+        task._walk_onto_stage = lambda: False
         diagnostics = []
         task._save_flow_diagnostic = diagnostics.append
 
@@ -2889,13 +2906,53 @@ class PVPTaskHelperTest(unittest.TestCase):
             return False, "2 0"
 
         task._wait_for_ocr_patterns = fake_wait_for_ocr_patterns
+        walks = []
+        task._walk_onto_stage = lambda: walks.append(True) and False
         diagnostics = []
         task._save_flow_diagnostic = diagnostics.append
 
         self.assertEqual("failed", PVPTask._start_auto_battle(task, 1))
         # BUG-20260908-04：重试预算用尽才判失败，保留 pvp_auto_battle_failed 落帧。
         self.assertEqual(PVP_CLICK_VERIFY_ATTEMPTS, len(menu_waits))
+        # Player 2026-10-12: walking onto the stage is tried once first.
+        self.assertEqual([True], walks)
         self.assertEqual(["pvp_auto_battle_failed"], diagnostics)
+
+    def test_start_auto_battle_walks_onto_stage_when_clicks_open_no_menu(self):
+        # Player 2026-10-12: three stage clicks left the character beside
+        # the stage and no menu opened.  Walking onto its centre opens it.
+        task = object.__new__(PVPTask)
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task.log_warning = lambda *_args, **_kwargs: None
+        task._click_template_until = lambda *_args, **_kwargs: True
+        task._ensure_free_ap_enabled = lambda: True
+        task._ensure_multiplier = lambda _multiplier: True
+        task._select_max_battle_count = lambda: None
+        task._verify_free_cost = lambda *_args: True
+        task._click_screen_reference = lambda x, y, after_sleep=0.0: None
+        task._click_ocr_pattern_center = lambda *args, **kwargs: True
+        task.capture_frame = lambda: np.zeros((1440, 2560, 3), dtype=np.uint8)
+        task.sleep = lambda *_args, **_kwargs: None
+        task._ocr_text = lambda _frame, name, roi=None: "正在进行" if name == "PVP 战斗中" else ""
+        walks = []
+        task._walk_onto_stage = lambda: walks.append(True) or True
+
+        def fake_wait_for_ocr_patterns(_patterns, timeout, name, **_kwargs):
+            if name == "PVP 自动战斗":
+                return False, ""
+            if name == "PVP 自动战斗菜单":
+                return True, "鲜血鸡尾酒"
+            return False, ""
+
+        task._wait_for_ocr_patterns = fake_wait_for_ocr_patterns
+        diagnostics = []
+        task._save_flow_diagnostic = diagnostics.append
+
+        self.assertEqual("started", PVPTask._start_auto_battle(task, 1))
+        self.assertEqual([True], walks)
+        self.assertEqual([], diagnostics)
 
     def test_start_auto_battle_retries_clicks_until_menu_confirmed(self):
         task = object.__new__(PVPTask)
