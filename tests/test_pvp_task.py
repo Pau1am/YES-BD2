@@ -30,6 +30,7 @@ from src.tasks.PVPTask import (
     HOME_GACHA_OCR_ROI,
     LOADING_TEMPLATE,
     PVP_AP_SHORTAGE_CLOSE_ATTEMPTS,
+    PVP_REWARD_PAGE_MAX_TAPS,
     PVP_AP_SHORTAGE_CLOSE_PATTERNS,
     PVP_AUTO_BATTLE_CLICK_REFERENCE,
     PVP_AUTO_BATTLE_MENU_VERIFY_SECONDS,
@@ -3551,3 +3552,72 @@ class BattleCountSettingTest(unittest.TestCase):
         self.assertEqual(4, battle_count_setting("4"))
         self.assertEqual("MAX", BATTLE_COUNT_OPTIONS[0])
         self.assertEqual("40", BATTLE_COUNT_OPTIONS[-1])
+
+
+class RewardPageAfterBattleTest(unittest.TestCase):
+    """赛季奖励 covering the hub after a battle (player report 2026-10-12,
+    v0.1.24: 「战斗结算或离开失败：目标倍率 40」 with the popup still up)."""
+
+    def _task(self, pages, frame_size=(1920, 1080), hub_after_taps=1):
+        task = object.__new__(PVPTask)
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task.sleep = lambda *_args, **_kwargs: None
+        width, height = frame_size
+        task.capture_frame = lambda: np.zeros((height, width, 3), dtype=np.uint8)
+        clicks = []
+        task.operate_click = lambda x, y, after_sleep=0.0: clicks.append((x, y))
+        task._match = lambda _frame, _spec: SimpleNamespace(score=0.1)
+        task._passes = lambda _result, _spec: len(clicks) >= hub_after_taps
+        boxes = [
+            SimpleNamespace(name=text, x=x, y=y, width=w, height=h)
+            for text, x, y, w, h in pages
+        ]
+        task._ocr_boxes = lambda _frame, name, roi=None, **_kwargs: (
+            boxes if name == "PVP 升降级确认" else []
+        )
+        return task, clicks
+
+    def test_the_season_reward_is_tapped_away_on_its_dismiss_line(self):
+        task, clicks = self._task(
+            [("赛季奖励", 1180, 230, 200, 60), ("点击画面即可返回。", 1187, 822, 168, 30)]
+        )
+        self.assertEqual("hub", PVPTask._wait_for_pvp_hub_or_confirm(task, timeout=1.0)[0])
+        self.assertEqual([((1187 + 84) / 1920, (822 + 15) / 1080)], clicks)
+
+    def test_an_unread_dismiss_line_taps_the_blank_spot(self):
+        for size in ((1920, 1080), (2560, 1440), (3840, 2160)):
+            with self.subTest(size=size):
+                task, clicks = self._task([("赛季奖励", 1180, 230, 200, 60)], frame_size=size)
+                self.assertEqual(
+                    "hub", PVPTask._wait_for_pvp_hub_or_confirm(task, timeout=1.0)[0]
+                )
+                self.assertEqual(1, len(clicks))
+                self.assertAlmostEqual(1271 / 1920, clicks[0][0])
+                self.assertAlmostEqual(837 / 1080, clicks[0][1])
+
+    def test_a_dialog_with_a_button_is_never_tapped_as_a_reward_page(self):
+        for button in ("确认", "确定", "购买", "补充", "取消"):
+            with self.subTest(button=button):
+                task, clicks = self._task(
+                    [
+                        ("赛季奖励", 1180, 230, 200, 60),
+                        ("点击画面即可返回", 1187, 822, 168, 30),
+                        (button, 900, 900, 120, 40),
+                    ]
+                )
+                with patch(
+                    "src.tasks.PVPTask.monotonic", side_effect=(0.0, 0.0, 0.5, 2.0)
+                ):
+                    state = PVPTask._wait_for_pvp_hub_or_confirm(task, timeout=1.0)[0]
+                self.assertEqual("timeout", state)
+                self.assertEqual([], clicks)
+
+    def test_a_page_that_never_closes_is_tapped_at_most_three_times(self):
+        task, clicks = self._task([("赛季奖励", 1180, 230, 200, 60)], hub_after_taps=99)
+        clock = iter(x * 0.5 for x in range(1000))
+        with patch("src.tasks.PVPTask.monotonic", side_effect=lambda: next(clock)):
+            state = PVPTask._wait_for_pvp_hub_or_confirm(task, timeout=2.0)[0]
+        self.assertEqual("timeout", state)
+        self.assertEqual(PVP_REWARD_PAGE_MAX_TAPS, len(clicks))
