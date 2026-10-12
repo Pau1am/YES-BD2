@@ -1689,7 +1689,11 @@ class DailyTaskHelperTest(unittest.TestCase):
         for key in QUICK_HUNT_TARGET_DEFAULTS:
             with self.subTest(key=key):
                 self.assertEqual(
-                    {"type": "toggle_choice", "options": ["金币", "史莱姆", "狩猎场"]},
+                    {
+                        "type": "drop_down",
+                        "options": ["金币", "史莱姆", "狩猎场"],
+                        "widget": "toggle_choice",
+                    },
                     task.config_type[key],
                 )
                 self.assertIn(key, task.config_type["执行快速狩猎"]["sub_configs"][True])
