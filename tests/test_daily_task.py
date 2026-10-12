@@ -1,3 +1,4 @@
+import itertools
 import re
 import unittest
 from dataclasses import replace
@@ -46,6 +47,8 @@ from src.tasks.quick_hunt import (
     QUICK_HUNT_START_ROI,
     QUICK_HUNT_STONE_COUNT_ROI,
     QUICK_HUNT_STONE_LIST_ROI,
+    QUICK_HUNT_TARGET_DEFAULTS,
+    quick_hunt_targets_from_legacy,
 )
 from src.tasks.QuickHuntTask import QuickHuntTask
 from src.tasks.task_vision_mixin import (
@@ -95,8 +98,9 @@ class DailyTaskHelperTest(unittest.TestCase):
         visible_keys = task.config_type["启用"]["sub_configs"][True]
         for key in (
             "识别成功后等待秒数",
-            "快速狩猎双倍策略",
-            "快速狩猎资源倾向",
+            "金币双倍时",
+            "史莱姆双倍时",
+            "都双倍时",
         ):
             self.assertIn(key, visible_keys)
         self.assertNotIn("快速狩猎章节图", visible_keys)
@@ -1508,117 +1512,91 @@ class DailyTaskHelperTest(unittest.TestCase):
             task._quick_hunt_double_states(),
         )
 
-    def test_quick_hunt_prefer_double_follows_preference_when_both_routes_are_double(self):
-        # Leo 2026-10-11: 「優先雙倍 如果兩個都雙倍 那就看資源傾向」 (weekends).
+    def _rice_task(self, double_states, **targets):
         task = object.__new__(QuickHuntTask)
-        task.config = {
-            "快速狩猎双倍策略": "优先双倍",
-            "快速狩猎资源倾向": "经验",
-        }
-        task._quick_hunt_double_states = lambda: {"金币": True, "经验": True}
-        clicks = []
-        task._quick_hunt_click_adventure = (
-            lambda resource: clicks.append(resource) or True
-        )
-        task.log_info = lambda *_args, **_kwargs: None
-
-        self.assertEqual("经验", task._quick_hunt_select_adventure_route())
-        self.assertEqual(["经验"], clicks)
-
-    def test_quick_hunt_prefer_double_takes_the_only_double_route(self):
-        task = object.__new__(QuickHuntTask)
-        task.config = {
-            "快速狩猎双倍策略": "优先双倍",
-            "快速狩猎资源倾向": "经验",
-        }
-        task._quick_hunt_double_states = lambda: {"金币": True, "经验": False}
-        clicks = []
-        task._quick_hunt_click_adventure = (
-            lambda resource: clicks.append(resource) or True
-        )
-        task.log_info = lambda *_args, **_kwargs: None
-
-        self.assertEqual("金币", task._quick_hunt_select_adventure_route())
-        self.assertEqual(["金币"], clicks)
-
-    def test_quick_hunt_ignore_double_always_selects_gold(self):
-        task = object.__new__(QuickHuntTask)
-        task.config = {
-            "快速狩猎双倍策略": "忽视双倍",
-            "快速狩猎资源倾向": "经验",
-        }
-        task._quick_hunt_double_states = lambda: self.fail(
-            "ignore-double mode must not inspect the template"
-        )
-        clicks = []
-        task._quick_hunt_click_adventure = (
-            lambda resource: clicks.append(resource) or True
-        )
-        task.log_info = lambda *_args, **_kwargs: None
-
-        self.assertTrue(task._quick_hunt_select_adventure_route())
-        self.assertEqual(["金币"], clicks)
-
-    def test_quick_hunt_scheduler_spends_all_rice_on_the_adventure_route(self):
-        # Leo 2026-10-11: no 狩猎场 any more, all free rice goes to 冒险航线.
-        task = object.__new__(QuickHuntTask)
-        task.config = {}
+        task.config = dict(QUICK_HUNT_TARGET_DEFAULTS, **targets)
+        task._quick_hunt_double_states = lambda: dict(double_states)
+        task.sleep = lambda *_args, **_kwargs: None
         task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
         task._quick_hunt_resource_empty = lambda _resource: False
-        task._quick_hunt_select_adventure_route = lambda: "经验"
         calls = []
+        task._quick_hunt_click_adventure = (
+            lambda resource: calls.append(("route", resource)) or True
+        )
+        task._quick_hunt_click_hunting_ground = (
+            lambda: calls.append(("route", "狩猎场")) or True
+        )
         task._quick_hunt_execute_current_map = (
             lambda mode, stage, expected_map_pattern=None: calls.append(
                 (stage, mode, expected_map_pattern)
             )
             or "done"
         )
+        return task, calls
 
-        self.assertTrue(task._quick_hunt_run_rice_scheduler())
-        self.assertEqual([("冒险航线", "MAX", r"史莱姆王国")], calls)
+    def test_quick_hunt_each_double_case_uses_its_own_setting(self):
+        # Leo 2026-10-12: one setting per double case, all rice MAX.
+        cases = (
+            ({"金币": True, "经验": False}, "金币双倍时"),
+            ({"金币": False, "经验": True}, "史莱姆双倍时"),
+            ({"金币": True, "经验": True}, "都双倍时"),
+        )
+        for states, key in cases:
+            for target, expected in (
+                ("金币", [("route", "金币"), ("冒险航线", "MAX", r"哥布林遗迹")]),
+                ("史莱姆", [("route", "经验"), ("冒险航线", "MAX", r"史莱姆王国")]),
+                ("狩猎场", [("route", "狩猎场"), ("狩猎场", "MAX", "狩猎场")]),
+            ):
+                with self.subTest(key=key, target=target):
+                    # Every other case points somewhere else.
+                    others = {
+                        other: "狩猎场" if target != "狩猎场" else "金币"
+                        for other in QUICK_HUNT_TARGET_DEFAULTS
+                        if other != key
+                    }
+                    task, calls = self._rice_task(states, **others, **{key: target})
+                    self.assertTrue(task._quick_hunt_run_rice_scheduler())
+                    self.assertEqual(expected, calls)
 
-    def test_quick_hunt_scheduler_without_a_route_hunts_nothing(self):
-        task = object.__new__(QuickHuntTask)
-        task.config = {}
-        task.info_set = lambda *_args, **_kwargs: None
-        task.log_info = lambda *_args, **_kwargs: None
-        task._quick_hunt_resource_empty = lambda _resource: False
-        task._quick_hunt_select_adventure_route = lambda: None
-        task._quick_hunt_execute_current_map = lambda *_args, **_kwargs: self.fail(
-            "no route picked: nothing may be hunted (狩猎场 is gone)"
+    def test_quick_hunt_defaults_match_the_old_prefer_double_gold(self):
+        self.assertEqual(
+            {
+                "金币双倍时": "金币",
+                "史莱姆双倍时": "史莱姆",
+                "都双倍时": "金币",
+            },
+            QUICK_HUNT_TARGET_DEFAULTS,
         )
 
+    def test_quick_hunt_empty_saved_target_runs_the_default(self):
+        # Leo 2026-10-12: a row always has one choice; nothing saved = default.
+        task, calls = self._rice_task({"金币": True, "经验": True}, 都双倍时="")
         self.assertTrue(task._quick_hunt_run_rice_scheduler())
+        self.assertEqual(("route", "金币"), calls[0])
 
-    def test_quick_hunt_prefer_double_without_double_uses_preferred_route(self):
-        task = object.__new__(QuickHuntTask)
-        task.config = {
-            "快速狩猎双倍策略": "优先双倍",
-            "快速狩猎资源倾向": "经验",
-        }
-        task._quick_hunt_double_states = lambda: {"金币": False, "经验": False}
-        task.sleep = lambda *_args, **_kwargs: None
-        clicks = []
-        task._quick_hunt_click_adventure = (
-            lambda resource: clicks.append(resource) or True
-        )
-        task.log_info = lambda *_args, **_kwargs: None
+    def test_quick_hunt_unknown_saved_target_runs_the_default(self):
+        task, calls = self._rice_task({"金币": False, "经验": True}, 史莱姆双倍时="经验")
+        self.assertTrue(task._quick_hunt_run_rice_scheduler())
+        self.assertEqual(("route", "经验"), calls[0])
 
-        self.assertEqual("经验", task._quick_hunt_select_adventure_route())
-        self.assertEqual(["经验"], clicks)
+    def test_quick_hunt_double_read_again_when_none_seen(self):
+        task, calls = self._rice_task({}, 金币双倍时="狩猎场")
+        reads = iter(({"金币": False, "经验": False}, {"金币": True, "经验": False}))
+        task._quick_hunt_double_states = lambda: next(reads)
+        self.assertTrue(task._quick_hunt_run_rice_scheduler())
+        self.assertEqual(("route", "狩猎场"), calls[0])
+
+    def test_quick_hunt_no_double_read_hunts_nothing_and_fails(self):
+        # Leo 2026-10-12: 「不會沒有雙倍」, so no badge is a misread.
+        task, calls = self._rice_task({"金币": False, "经验": False})
+        task._quick_hunt_log_screen = lambda *_args: None
+        with patch("src.tasks.quick_hunt.QUICK_HUNT_DOUBLE_READ_SECONDS", 0.0):
+            self.assertFalse(task._quick_hunt_run_rice_scheduler())
+        self.assertEqual([], calls)
 
     def test_quick_hunt_adventure_wrong_map_reselects_by_ocr_once(self):
-        task = object.__new__(QuickHuntTask)
-        task.config = {}
-        task.info_set = lambda *_args, **_kwargs: None
-        task.log_info = lambda *_args, **_kwargs: None
-        task._quick_hunt_resource_empty = lambda _resource: False
-        task._quick_hunt_select_adventure_route = lambda: "金币"
-        calls = []
-        task._quick_hunt_click_adventure = (
-            lambda resource: calls.append(("reselect", resource)) or True
-        )
+        task, calls = self._rice_task({"金币": True, "经验": False})
         results = iter(("wrong_map", "done"))
         task._quick_hunt_execute_current_map = (
             lambda mode, stage, expected_map_pattern=None: calls.append(
@@ -1630,56 +1608,118 @@ class DailyTaskHelperTest(unittest.TestCase):
         self.assertTrue(task._quick_hunt_run_rice_scheduler())
         self.assertEqual(
             [
+                ("route", "金币"),
                 ("冒险航线", "MAX", r"哥布林遗迹"),
-                ("reselect", "金币"),
+                ("route", "金币"),
                 ("冒险航线重试", "MAX", r"哥布林遗迹"),
             ],
             calls,
         )
 
-    def test_quick_hunt_strategy_offers_only_prefer_and_ignore_double(self):
-        # Leo 2026-10-11: 「快速狩獵設定頁 只需要優先雙倍 忽視雙倍」.
-        task = object.__new__(QuickHuntTask)
-        task.default_config = {}
-        task.config_description = {}
-        task.config_type = {}
-        task.include_quick_hunt_config = True
-        task._install_quick_hunt_config()
+    def test_quick_hunt_hunting_ground_wrong_map_reselects_once_then_stops(self):
+        task, calls = self._rice_task({"金币": True, "经验": True}, 都双倍时="狩猎场")
+        task._quick_hunt_execute_current_map = (
+            lambda mode, stage, expected_map_pattern=None: calls.append(stage) or "wrong_map"
+        )
+        self.assertFalse(task._quick_hunt_run_rice_scheduler())
         self.assertEqual(
-            ["优先双倍", "忽视双倍"],
-            task.config_type["快速狩猎双倍策略"]["options"],
+            [("route", "狩猎场"), "狩猎场", ("route", "狩猎场"), "狩猎场重试"], calls
         )
-        self.assertNotIn("强制双倍", task.config_description["快速狩猎双倍策略"])
 
-    def test_quick_hunt_saved_force_double_runs_as_prefer_double(self):
+    def test_quick_hunt_hunting_ground_dialog_check(self):
         task = object.__new__(QuickHuntTask)
-        task.config = {
-            "快速狩猎双倍策略": "强制双倍",
-            "快速狩猎资源倾向": "经验",
-        }
-        task._quick_hunt_double_states = lambda: {"金币": False, "经验": False}
-        task.sleep = lambda *_args, **_kwargs: None
-        clicks = []
-        task._quick_hunt_click_adventure = (
-            lambda resource: clicks.append(resource) or True
-        )
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
+        task.sleep = lambda *_args, **_kwargs: None
+        task.capture_frame = lambda: None
+        task._quick_hunt_ui_timeout = lambda: 5.0
+        task._normalize_text = lambda text: text
+        reads = []
 
-        self.assertEqual("经验", task._quick_hunt_select_adventure_route())
-        self.assertEqual(["经验"], clicks)
+        class FakeVision:
+            def ocr_boxes(self, _frame, _name, relative_roi=None):
+                return [SimpleNamespace(name=reads.pop(0))]
 
-    def test_quick_hunt_settings_have_no_rice_split(self):
+        task._quick_vision = lambda: FakeVision()
+        for seen, expected in (
+            (["哥布林遗迹 取消 MAX"], "wrong"),
+            (["史莱姆王国 取消 MAX"], "wrong"),
+            (["火之洞穴 取消 MAX"], "wrong"),
+            (["野猪洞穴 取消 MAX"], "matched"),
+            (["8.角斗士竞技场 取消 MAX", "8.角斗士竞技场 取消 MAX"], "matched"),
+        ):
+            with self.subTest(seen=seen):
+                reads[:] = list(seen)
+                state, _text, _map = task._quick_hunt_wait_map_confirmation(
+                    "狩猎场", name="狩猎场-地图确认"
+                )
+                self.assertEqual(expected, state)
+
+    def test_quick_hunt_hunting_ground_needs_two_dialog_reads(self):
+        task = object.__new__(QuickHuntTask)
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task.sleep = lambda *_args, **_kwargs: None
+        task.capture_frame = lambda: None
+        task._quick_hunt_ui_timeout = lambda: 0.3
+        task._normalize_text = lambda text: text
+        reads = itertools.chain(["8.角斗士竞技场 取消 MAX"], itertools.repeat(""))
+
+        class FakeVision:
+            def ocr_boxes(self, _frame, _name, relative_roi=None):
+                return [SimpleNamespace(name=next(reads))]
+
+        task._quick_vision = lambda: FakeVision()
+        state, _text, _map = task._quick_hunt_wait_map_confirmation(
+            "狩猎场", name="狩猎场-地图确认"
+        )
+        self.assertEqual("timeout", state)
+
+    def test_quick_hunt_settings_are_four_toggle_rows(self):
         task = object.__new__(QuickHuntTask)
         task.default_config = {}
         task.config_description = {}
         task.config_type = {}
         task.include_quick_hunt_config = True
         task._install_quick_hunt_config()
-        self.assertNotIn("快速狩猎米饭分配", task.default_config)
-        self.assertNotIn(
-            "快速狩猎米饭分配",
-            task.config_type["执行快速狩猎"]["sub_configs"][True],
+        for key in ("快速狩猎米饭分配", "快速狩猎双倍策略", "快速狩猎资源倾向"):
+            self.assertNotIn(key, task.default_config)
+        for key in QUICK_HUNT_TARGET_DEFAULTS:
+            with self.subTest(key=key):
+                self.assertEqual(
+                    {"type": "toggle_choice", "options": ["金币", "史莱姆", "狩猎场"]},
+                    task.config_type[key],
+                )
+                self.assertIn(key, task.config_type["执行快速狩猎"]["sub_configs"][True])
+
+    def test_quick_hunt_old_settings_become_targets_once(self):
+        self.assertEqual({}, quick_hunt_targets_from_legacy({}))
+        self.assertEqual(
+            {},
+            quick_hunt_targets_from_legacy(
+                {"快速狩猎双倍策略": "忽视双倍", "都双倍时": "狩猎场"}
+            ),
         )
+        self.assertEqual(
+            dict.fromkeys(QUICK_HUNT_TARGET_DEFAULTS, "金币"),
+            quick_hunt_targets_from_legacy(
+                {"快速狩猎双倍策略": "忽视双倍", "快速狩猎资源倾向": "经验"}
+            ),
+        )
+        for strategy in ("优先双倍", "强制双倍"):
+            with self.subTest(strategy=strategy):
+                self.assertEqual(
+                    {
+                        "金币双倍时": "金币",
+                        "史莱姆双倍时": "史莱姆",
+                        "都双倍时": "史莱姆",
+                    },
+                    quick_hunt_targets_from_legacy(
+                        {"快速狩猎双倍策略": strategy, "快速狩猎资源倾向": "经验"}
+                    ),
+                )
 
     def test_quick_hunt_stone_counts_follow_top_to_bottom_element_order(self):
         task = object.__new__(QuickHuntTask)

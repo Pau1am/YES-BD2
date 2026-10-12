@@ -2617,6 +2617,58 @@ class AlreadyDoneMapTest(unittest.TestCase):
         self.assertFalse(result.completed)
 
 
+class CountProvesPressTest(unittest.TestCase):
+    """Player 2026-10-12 (Q_sp5 主城区, sand): 吸收 went 12/21 -> 13/21 while
+    its icon still read bright and only 探查's toast showed; the run stopped
+    as 「吸收执行证据不一致」."""
+
+    def _run(self, after, stable=True, feedback_text="在180秒内确认隐藏物品的位置"):
+        from src.tasks.map_trade.collector_constants import SkillFeedbackObservation
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            progress = ProgressStore(
+                Path(temp_dir) / "progress.json",
+                lambda: datetime(2026, 10, 12, 12, tzinfo=UTC_PLUS_8),
+            )
+            progress.load()
+            progress.arm_action("Q_sp5", CollectionMapRole.MAIN_AREA, "吸收", baseline=(12, 21))
+            progress.mark_action_clicked("Q_sp5", CollectionMapRole.MAIN_AREA, "吸收")
+            collector = object.__new__(Collector)
+            collector.progress = progress
+            collector._status = lambda *a: None
+            collector._note_missed_press = lambda *a, **k: False
+
+            def read(action, detection=None, **_k):
+                collector._last_count_window_stable = stable
+                return after
+
+            collector._read_count_window = read
+            bright = ActionIconDetection(
+                ActionIconState.AVAILABLE, MatchResult(0.98, (1, 1), (5, 5)), stable=True
+            )
+            result = collector._finish_after_click(
+                ABSORB_ACTION,
+                card_id="Q_sp5",
+                map_role=CollectionMapRole.MAIN_AREA,
+                before=(12, 21),
+                detection=bright,
+                post_detection=bright,
+                feedback=SkillFeedbackObservation(feedback_text, None, 0.0),
+            )
+            record = progress.get_action_record("Q_sp5", CollectionMapRole.MAIN_AREA, "吸收")
+            return result, record
+
+    def test_a_steady_plus_one_proves_the_press_with_a_bright_icon(self):
+        result, record = self._run((13, 21))
+        self.assertTrue(result.completed)
+        self.assertFalse(record["pending"])
+
+    def test_an_unchanged_or_unsteady_count_still_proves_nothing(self):
+        self.assertFalse(self._run((12, 21))[0].completed)
+        self.assertFalse(self._run((14, 21))[0].completed)
+        self.assertFalse(self._run((13, 21), stable=False)[0].completed)
+
+
 class GreyIconTest(unittest.TestCase):
     """Leo 2026-10-07: a grey icon on arrival is done here this week; an old
     unsettled count never stops the map (2K 埃克夏森林深处 stopped the run)."""

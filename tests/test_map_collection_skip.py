@@ -187,16 +187,38 @@ class SkipBrokenCardTest(unittest.TestCase):
         self.assertEqual({"main_area"}, state.completed_targets("Q_sp1"))
         self.assertTrue(state.card_verified("Q_sp2"))
 
-    def test_other_skill_failures_still_stop_the_run(self):
-        # Unsure on a map with nothing pending: stop, as before.
+    def test_a_skill_failure_skips_the_card_and_names_where(self):
+        # Leo 2026-10-12: a player's weekly run stopped on 第5章 主城区 (吸收
+        # not confirmed).  Skip that card, run the next, and say where.
         def use_actions(progress, events, actions, *, card_id, map_role):
             events.append(("collect", card_id, map_role.value))
-            return SkillExecutionResult(False, message="未确认采集技能栏")
+            if card_id == "Q_sp1":
+                return SkillExecutionResult(False, message="未确认采集技能栏")
+            _seed_action_records(progress, card_id, map_role.value)
+            return SkillExecutionResult(True)
+
+        result, events, warnings, state = self._run(("Q_sp1", "Q_sp2"), use_actions=use_actions)
+
+        self.assertIn(("home",), events)
+        self.assertNotIn(("collect", "Q_sp1", "battle_area_1"), events)
+        self.assertTrue(state.card_verified("Q_sp2"))
+        self.assertFalse(state.card_verified("Q_sp1"))
+        self.assertFalse(result.success)
+        self.assertTrue(result.message.startswith("第1章"), result.message)
+        self.assertIn(CollectionMapRole.MAIN_AREA.label, result.message)
+        self.assertIn("技能操作失败：未确认采集技能栏", result.message)
+        self.assertIn("下次运行再跑", result.message)
+        self.assertNotIn("取消勾选", result.message)
+        self.assertTrue(any("先跳过，继续下一张" in line for line in warnings))
+
+    def test_used_up_skills_still_end_the_run(self):
+        def use_actions(progress, events, actions, *, card_id, map_role):
+            events.append(("collect", card_id, map_role.value))
+            return SkillExecutionResult(False, depleted=True, message="吸收今日已用完")
 
         result, events, _warnings, _state = self._run(("Q_sp1", "Q_sp2"), use_actions=use_actions)
 
-        self.assertFalse(result.success)
-        self.assertIn("技能操作失败", result.message)
+        self.assertTrue(result.depleted)
         self.assertNotIn("Q_sp2", [event[1] for event in events if len(event) > 1])
 
 
