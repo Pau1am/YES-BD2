@@ -140,6 +140,24 @@ class GameSizeTest(unittest.TestCase):
         self.assertIn("全屏", text)
         self.assertEqual([True], [notify for _text, notify in task.warnings])
 
+    def test_game_fullscreen_reason_does_not_advise_fullscreen(self):
+        # A 16:10 screen: the game's own 全屏 is the cause, so 「改成全屏」
+        # would be wrong; the reason says to switch the game to 窗口模式.
+        found = executor(2560, 1600)
+        reason = (
+            "游戏现在是全屏，会自己撑满整个屏幕（2560 × 1600），工具改不了它的大小。"
+            "请在游戏里打开 设置 → 图像 → 画面模式，改成「窗口模式」，再按「调整」。"
+        )
+        resize = resizes_to(found, size=(2560, 1600), reason=reason)
+        task = Recorder(found)
+        clock = Clock()
+        self.assertTrue(
+            game_size.fix_or_warn(task, resize=resize, sleep=clock.sleep, monotonic=clock)
+        )
+        text = task.info[game_size.NOTICE_KEY]
+        self.assertIn(reason, text)
+        self.assertNotIn("建议把游戏改成全屏", text)
+
     def test_resize_that_does_not_take_warns(self):
         found = executor(1467, 824)
         resize = resizes_to(found, size=(1467, 824))

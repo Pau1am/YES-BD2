@@ -259,6 +259,56 @@ class ManualResolutionTest(unittest.TestCase):
             backend.style,
         )
 
+    def test_game_fullscreen_that_snaps_back_says_to_use_window_mode(self):
+        # A 2560x1600 laptop with the game in its own 全屏 (2026-10-12): the
+        # game puts the window back over the whole screen after every resize.
+        manager = _FakeDeviceManager()
+        screen = (0, 0, 2560, 1600)
+        backend = _FakeBackend(
+            rect=screen,
+            monitor_area=(0, 0, 2560, 1552),
+            monitor_bounds=screen,
+        )
+
+        def snap_back(_hwnd, rect, *, frame_changed):
+            backend.calls.append(("position", rect, frame_changed))
+            backend.rect = screen
+            backend._sync_client_size()
+
+        backend.set_window_pos = snap_back
+        clock = iter([0.0, 0.0, 10.0])
+
+        with self.assertRaisesRegex(ManualResolutionError, "窗口模式") as caught:
+            resize_game_window(
+                manager,
+                (2560, 1440),
+                backend=backend,
+                monotonic=lambda: next(clock),
+                sleep=lambda _seconds: None,
+            )
+        self.assertIn("2560 × 1600", str(caught.exception))
+        self.assertIn("设置 → 图像 → 画面模式", str(caught.exception))
+
+    def test_window_that_settles_at_another_size_keeps_the_plain_message(self):
+        manager = _FakeDeviceManager()
+        backend = _FakeBackend(monitor_area=(0, 0, 2560, 1440))
+
+        def stuck(_hwnd, rect, *, frame_changed):
+            backend.calls.append(("position", rect, frame_changed))
+            backend.client_size = (1500, 844)
+
+        backend.set_window_pos = stuck
+        clock = iter([0.0, 0.0, 10.0])
+
+        with self.assertRaisesRegex(ManualResolutionError, "没有稳定到目标分辨率"):
+            resize_game_window(
+                manager,
+                (1920, 1080),
+                backend=backend,
+                monotonic=lambda: next(clock),
+                sleep=lambda _seconds: None,
+            )
+
     def test_running_task_is_rejected_before_window_changes(self):
         manager = _FakeDeviceManager()
         backend = _FakeBackend()

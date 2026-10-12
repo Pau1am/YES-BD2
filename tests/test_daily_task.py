@@ -1091,6 +1091,23 @@ class DailyTaskHelperTest(unittest.TestCase):
         self.assertEqual((1090, 814), clicks[0])
         self.assertEqual("未确认领取", statuses["一键收菜结果"])
 
+    def test_business_collect_presses_again_while_home_still_shows(self):
+        # Player 2026-10-12: one lost press on 经营管理 failed 一键收菜.
+        task, reference_clicks, _clicks = self._business_task([])
+        task.config = {"一键收菜菜单等待秒数": 0.0}
+        task._home_still_showing = lambda *_args: True
+
+        self.assertFalse(DailyTask.run_business_collect(task))
+        self.assertEqual([(165, 260), (165, 260)], reference_clicks)
+
+    def test_business_collect_is_not_pressed_again_once_home_is_gone(self):
+        task, reference_clicks, _clicks = self._business_task([])
+        task.config = {"一键收菜菜单等待秒数": 0.0}
+        task._home_still_showing = lambda *_args: False
+
+        self.assertFalse(DailyTask.run_business_collect(task))
+        self.assertEqual([(165, 260)], reference_clicks)
+
     def test_business_collect_skips_when_popup_is_not_found(self):
         task, reference_clicks, clicks = self._business_task([])
         task.config = {"一键收菜菜单等待秒数": 0.0}
@@ -2206,11 +2223,41 @@ class DailyTaskHelperTest(unittest.TestCase):
 
     def test_daily_run_goes_on_after_a_failed_step_back_on_home(self):
         # Finding 24: a failed guild step no longer drops 小屋签到/一键收菜.
+        # A failed step back on home is now tried once more (player
+        # 2026-10-12), so the guild step runs twice before 小屋签到.
         task, calls, infos = self._run_task(False, home_back=True)
 
         self.assertFalse(DailyTask.run(task))
-        self.assertEqual(["guild", "公会签到失败后主页确认", "home", "business"], calls)
+        self.assertEqual(
+            [
+                "guild",
+                "公会签到失败后主页确认",
+                "guild",
+                "公会签到失败后主页确认",
+                "home",
+                "business",
+            ],
+            calls,
+        )
         self.assertEqual("['公会签到']", infos["失败"])
+
+    def test_a_failed_step_back_on_home_is_tried_once_more(self):
+        # Player 2026-10-12 (v0.1.24): the announcement board covered home
+        # right after 08:00, and 公会/小屋/一键收菜 all failed on one go.
+        task, calls, infos = self._run_task(False, home_back=True)
+        results = iter((False, True))
+        task.run_guild_sign_in = lambda: calls.append("guild") or next(results)
+
+        self.assertTrue(DailyTask.run(task))
+        self.assertEqual(["guild", "公会签到失败后主页确认", "guild", "home", "business"], calls)
+        self.assertEqual("['公会签到', '小屋签到', '一键收菜']", infos["完成"])
+
+    def test_a_failed_step_off_home_is_not_tried_again(self):
+        task, calls, _infos = self._run_task(False, home_back=False)
+
+        with patch("src.tasks.DailyTask.recover_to_home", return_value=True):
+            self.assertFalse(DailyTask.run(task))
+        self.assertEqual(1, calls.count("guild"))
 
     def test_daily_run_goes_home_after_a_failed_step_left_elsewhere(self):
         task, calls, _infos = self._run_task(RuntimeError("boom"), home_back=False)

@@ -40,7 +40,10 @@ class HelloOnlyAccountTest(unittest.TestCase):
     """The Windows Hello-only setting only matters for a Microsoft account
     (clone thread 2026-10-10): a local account has no switch to turn off."""
 
-    def _run(self, *, policy=2, provider=None, user_extended=None, sid=SID, error=None):
+    def _run(
+        self, *, policy=2, provider=None, user_extended=None, sid=SID, error=None,
+        linked=None,
+    ):
         def read_hklm(path, name):
             if name == "DevicePasswordLessBuildVersion":
                 return policy
@@ -52,6 +55,7 @@ class HelloOnlyAccountTest(unittest.TestCase):
             mock.patch.dict(sys.modules, {"winreg": _winreg(user_extended, error)}),
             mock.patch.object(clone_desktop, "_read_hklm", side_effect=read_hklm),
             mock.patch.object(clone_desktop, "_current_user_sid", return_value=sid),
+            mock.patch.object(clone_desktop, "_internet_identity", return_value=linked),
         ):
             return clone_desktop.microsoft_account(), clone_desktop.hello_only()
 
@@ -78,6 +82,17 @@ class HelloOnlyAccountTest(unittest.TestCase):
         self.assertEqual((True, False), self._run(policy=0, provider="MicrosoftAccount"))
         self.assertEqual((True, False), self._run(policy=None, provider="MicrosoftAccount"))
 
+    def test_windows_answer_comes_first(self):
+        # B站 UP 2026-10-12: local account signed in to the Store (HKCU entry)
+        # but no Microsoft account on Windows -> no switch, must not stop.
+        self.assertEqual((False, False), self._run(linked=False, user_extended=1))
+        self.assertEqual((True, True), self._run(linked=True, provider="Local"))
+
+    def test_internet_identity_without_windows(self):
+        if sys.platform == "win32":
+            self.skipTest("real Windows answers")
+        self.assertIsNone(clone_desktop._internet_identity())
+
     def test_sid_from_whoami(self):
         clone_desktop._current_user_sid.cache_clear()
         out = f'"desktop-abc\\nobel","{SID}"\n'
@@ -88,6 +103,62 @@ class HelloOnlyAccountTest(unittest.TestCase):
         with mock.patch.object(clone_desktop.subprocess, "run", side_effect=OSError("no")):
             self.assertIsNone(clone_desktop._current_user_sid())
         clone_desktop._current_user_sid.cache_clear()
+
+
+class TurnOffHelloOnlyTest(unittest.TestCase):
+    """「帮我关掉」 (Leo 2026-10-12): writes the value the Settings switch writes."""
+
+    def test_elevated_writes_the_value(self):
+        written = {}
+
+        class Key(_Key):
+            pass
+
+        fake = types.SimpleNamespace(
+            HKEY_LOCAL_MACHINE="HKLM", KEY_SET_VALUE=2, REG_DWORD=4,
+            CreateKeyEx=lambda root, path, reserved, access: Key(0),
+            SetValueEx=lambda key, name, reserved, kind, value: written.update(
+                {name: (kind, value)}
+            ),
+        )
+        with (
+            mock.patch.dict(sys.modules, {"winreg": fake}),
+            mock.patch.object(clone_desktop, "is_admin", return_value=True),
+            mock.patch.object(clone_desktop, "hello_only", return_value=False),
+        ):
+            self.assertTrue(clone_desktop.turn_off_hello_only())
+        self.assertEqual({"DevicePasswordLessBuildVersion": (4, 0)}, written)
+
+    def _not_elevated(self, result, states):
+        calls = []
+        shell = types.SimpleNamespace()
+
+        def shell_execute(*args):
+            calls.append(args)
+            return result
+
+        shell.ShellExecuteW = shell_execute
+        windll = types.SimpleNamespace(shell32=shell)
+        with (
+            mock.patch.object(clone_desktop.ctypes, "windll", windll, create=True),
+            mock.patch.object(clone_desktop, "is_admin", return_value=False),
+            mock.patch.object(clone_desktop, "hello_only", side_effect=states),
+            mock.patch.object(clone_desktop.time, "sleep"),
+        ):
+            return clone_desktop.turn_off_hello_only(wait=5), calls
+
+    def test_not_elevated_asks_windows_and_waits(self):
+        done, calls = self._not_elevated(42, [True, True, False])
+        self.assertTrue(done)
+        _hwnd, verb, program, arguments, _cwd, show = calls[0]
+        self.assertEqual(("runas", "reg.exe", 0), (verb, program, show))
+        self.assertIn("DevicePasswordLessBuildVersion", arguments)
+        self.assertIn("/d 0 /f", arguments)
+        self.assertIn('"HKLM\\SOFTWARE\\Microsoft\\Windows NT\\', arguments)
+
+    def test_player_said_no(self):
+        done, _calls = self._not_elevated(5, [True])
+        self.assertFalse(done)
 
 
 if __name__ == "__main__":
