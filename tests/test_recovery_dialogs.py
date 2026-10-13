@@ -312,6 +312,51 @@ class FastRecoveryTest(unittest.TestCase):
         self.assertEqual(1, len(presses))  # the back arrow first
         self.assertEqual(["H"], keys)
 
+    def test_back_that_moved_a_page_is_pressed_again_before_h(self):
+        # Live 2K 2026-10-13: event stage page -> back -> event hub; H there
+        # did nothing for ~6 s.  A back that moved gets another back first.
+        from src.tasks.map_trade.models import ScreenState
+
+        stage = np.full((1080, 1920, 3), 120, np.uint8)
+        hub = np.full((1080, 1920, 3), 60, np.uint8)
+        pages = [stage, hub, HOME]
+        state = {"page": 0}
+        presses, keys = [], []
+
+        class FakeNavigator:
+            def __init__(self, task, vision):
+                self.vision = SimpleNamespace(capture=lambda: pages[state["page"]])
+
+            def _home_confirmation_signals(self, frame):
+                return (frame is HOME, 0, 0.0, "")
+
+            def classify(self):
+                return ScreenState.UNKNOWN
+
+            def clear_home_announcement(self, _frame, _clicks=0):
+                return False
+
+        def back(*_a, **_k):
+            presses.append(1)
+            state["page"] += 1
+
+        task = SimpleNamespace(
+            info_set=lambda *a: None,
+            log_info=lambda *a, **k: None,
+            sleep=lambda *_a: None,
+            operate_click=back,
+            tap_key=lambda key, after_sleep=0.0: keys.append(key) or True,
+        )
+        with (
+            mock.patch.object(recovery, "Navigator", FakeNavigator),
+            mock.patch.object(recovery, "Vision", lambda task: None),
+            mock.patch.object(recovery, "_handle_dialog", lambda *_a: "none"),
+            mock.patch.object(recovery, "monotonic", iter(range(0, 1000)).__next__),
+        ):
+            self.assertTrue(recovery.recover_to_home(task))
+        self.assertEqual(2, len(presses))
+        self.assertEqual([], keys)
+
     def test_black_loading_screen_is_waited_out_not_pressed(self):
         # Live 2K 2026-09-29: back pressed 4 times into the event->home loading.
         black = np.zeros((1080, 1920, 3), np.uint8)

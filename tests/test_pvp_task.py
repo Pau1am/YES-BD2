@@ -3111,6 +3111,9 @@ class PVPTaskHelperTest(unittest.TestCase):
                 switch["ratio"] = after_click(switch["ratio"])
 
         task._free_ap_switch_ratio = lambda: switch["ratio"]
+        # The knob is only read with the colours flagged; unread by default.
+        switch["knob"] = None
+        task._free_ap_switch_knob_side = lambda: switch["knob"]
         task._click_screen_reference = fake_click
         settle = patch("src.tasks.PVPTask.PVP_FREE_AP_SWITCH_SETTLE_SECONDS", 0.0)
         settle.start()
@@ -3157,6 +3160,51 @@ class PVPTaskHelperTest(unittest.TestCase):
         colour_check.remember(colour_check.ColourCheck(40.0, "测试"))
         task, switch = self._free_switch_task(0.0, lambda _ratio: 0.37)
 
+        self.assertFalse(PVPTask._ensure_free_ap_enabled(task))
+        self.assertEqual([], switch["clicks"])
+
+    def _distorted(self):
+        from src.utils import colour_check
+
+        previous = colour_check.last_check()
+        self.addCleanup(lambda: colour_check.remember(previous))
+        colour_check.remember(colour_check.ColourCheck(40.0, "测试"))
+
+    def test_distorted_colours_turn_on_an_off_knob_with_one_click(self):
+        # Player 10-13 (v0.1.30, 2560x1440 window): colours flagged, the
+        # switch plainly off; the knob decides instead of the yellow.
+        self._distorted()
+        task, switch = self._free_switch_task(0.0)
+        switch["knob"] = "off"
+
+        def click(x, y, after_sleep=0.0):
+            switch["clicks"].append((x, y))
+            switch["knob"] = "on"
+
+        task._click_screen_reference = click
+        self.assertTrue(PVPTask._ensure_free_ap_enabled(task))
+        self.assertEqual([PVP_FREE_AP_SWITCH_SCREEN_POINT], switch["clicks"])
+
+    def test_distorted_colours_leave_a_knob_on_the_right_alone(self):
+        self._distorted()
+        task, switch = self._free_switch_task(0.0)
+        switch["knob"] = "on"
+        self.assertTrue(PVPTask._ensure_free_ap_enabled(task))
+        self.assertEqual([], switch["clicks"])
+
+    def test_distorted_colours_and_a_knob_that_does_not_move(self):
+        # Pressed again only while the knob is still left, then stop.
+        self._distorted()
+        task, switch = self._free_switch_task(0.0)
+        switch["knob"] = "off"
+        self.assertFalse(PVPTask._ensure_free_ap_enabled(task))
+        self.assertEqual([PVP_FREE_AP_SWITCH_SCREEN_POINT] * 2, switch["clicks"])
+
+    def test_distorted_colours_and_knob_reads_that_disagree_press_nothing(self):
+        self._distorted()
+        task, switch = self._free_switch_task(0.0)
+        reads = iter(["off", None])
+        task._free_ap_switch_knob_side = lambda: next(reads)
         self.assertFalse(PVPTask._ensure_free_ap_enabled(task))
         self.assertEqual([], switch["clicks"])
 

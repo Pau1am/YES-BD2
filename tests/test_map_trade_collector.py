@@ -50,7 +50,6 @@ from src.tasks.map_trade.collector_constants import (
 )
 from src.tasks.map_trade.collector_skills import (
     PIPELINE_CLICK_INTERVAL,
-    PRESS_AGAIN_PAUSE_SECONDS,
 )
 from src.tasks.map_trade.models import (
     CARD_BY_ID,
@@ -1315,8 +1314,11 @@ class CollectorSkillTest(unittest.TestCase):
     def test_missed_summon_press_is_pressed_again(self):
         # A player 2026-10-09: 「跑图召集点的太快了经常点不上失败」.
         collector, clicks, statuses, _progress, taken = self._missed_press_collector(1)
-        sleeps = []
-        collector.task.sleep = lambda seconds: sleeps.append(seconds)
+        order = []
+        feedback = collector._read_action_feedback
+        collector._read_action_feedback = lambda action: (
+            order.append(action.name) or feedback(action)
+        )
 
         result = collector._use_actions(
             BATTLE_ACTIONS,
@@ -1325,10 +1327,11 @@ class CollectorSkillTest(unittest.TestCase):
         )
 
         self.assertTrue(result.completed, result.message)
-        # 吸收, 召集 (missed), 压制, then 召集 once more; nothing twice.
+        # YES-BD2 #23: the still-bright 召集 is pressed again before 压制
+        # (it used to come after 压制); nothing twice.
+        self.assertEqual(["吸收", "召集", "召集", "压制"], order)
         self.assertEqual(4, len(clicks))
         self.assertEqual({"吸收": 1, "召集": 1, "压制": 1}, taken)
-        self.assertIn(PRESS_AGAIN_PAUSE_SECONDS, sleeps)
         self.assertTrue(any("补按" in str(value) for _key, value in statuses))
 
     def test_summon_is_pressed_again_once_and_then_left_alone(self):
@@ -1653,8 +1656,9 @@ class CollectorSkillTest(unittest.TestCase):
         self.assertEqual(
             [
                 (
-                    SKILL_GROUP_RELATIVE_POINTS[1][0],
-                    SKILL_GROUP_RELATIVE_POINTS[1][1],
+                    # group 1 is on screen (BAR_SHOWN) and shows nothing: 2 first
+                    SKILL_GROUP_RELATIVE_POINTS[2][0],
+                    SKILL_GROUP_RELATIVE_POINTS[2][1],
                     SKILL_GROUP_SWITCH_SETTLE_SECONDS,
                 )
             ],
@@ -1690,11 +1694,11 @@ class CollectorSkillTest(unittest.TestCase):
             map_role=CollectionMapRole.BATTLE_AREA_1,
         )
 
-        # All three groups are tried (the user keeps collection in group 2).
+        # All three groups are tried, the one on screen (1) last.
         self.assertEqual(
             [
-                (point[0], point[1], SKILL_GROUP_SWITCH_SETTLE_SECONDS)
-                for _group, point in sorted(SKILL_GROUP_RELATIVE_POINTS.items())
+                (*SKILL_GROUP_RELATIVE_POINTS[group], SKILL_GROUP_SWITCH_SETTLE_SECONDS)
+                for group in (2, 3, 1)
             ],
             clicks,
         )
@@ -1738,7 +1742,9 @@ class CollectorSkillTest(unittest.TestCase):
             detect=lambda *_args: found if group[0] == 2 else missing
         )
         self.assertTrue(collector._open_skill_menu((ABSORB_ICON,), allow_group_one_recovery=True))
-        self.assertEqual(2, len(clicks))  # group 1, then group 2
+        # Group 1 is on screen and shows nothing: straight to group 2
+        # (Leo 2026-10-13 「切我的工具列」: no flip through group 1).
+        self.assertEqual([SKILL_GROUP_RELATIVE_POINTS[2]], clicks)
 
     @BAR_SHOWN
     def test_start_search_recovers_group_one_once_then_fails(self):

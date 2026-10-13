@@ -8,6 +8,7 @@ from unittest.mock import patch
 import numpy as np
 from ok.util.config import Config
 
+from src.tasks.BaseBD2Task import RECOGNITION_SETTLE_SECONDS
 from src.tasks.DailyTask import (
     BUSINESS_COLLECT_KEYWORDS,
     GUILD_FINISHED_TEMPLATE,
@@ -97,7 +98,7 @@ class DailyTaskHelperTest(unittest.TestCase):
         )
         visible_keys = task.config_type["启用"]["sub_configs"][True]
         for key in (
-            "识别成功后等待秒数",
+            "识别后等待秒数",
             "金币双倍时",
             "史莱姆双倍时",
             "都双倍时",
@@ -178,7 +179,7 @@ class DailyTaskHelperTest(unittest.TestCase):
         hydrated_config.validator = None
         modified = hydrated_config.verify_config(
             {
-                "识别成功后等待秒数": 1.0,
+                "识别后等待秒数": 1.0,
                 "快速狩猎章节图": "低练度·章节1",
                 "快速狩猎狩猎场": False,
             },
@@ -631,7 +632,7 @@ class DailyTaskHelperTest(unittest.TestCase):
         task._wait_for_home_confirmation = lambda *_args, **_kwargs: True
 
         self.assertTrue(DailyTask.run_guild_sign_in(task))
-        self.assertEqual([1.0, 1.0], sleeps)
+        self.assertEqual([RECOGNITION_SETTLE_SECONDS] * 2, sleeps)
         self.assertEqual([(370, 155), (450, 650), (100, 50)], clicks)
 
     def test_guild_sign_in_accepts_main_active_template(self):

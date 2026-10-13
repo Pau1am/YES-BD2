@@ -34,7 +34,16 @@ NOT_FOUND = CollectionCardSelectionResult(
 
 
 class SkipBrokenCardTest(unittest.TestCase):
-    def _run(self, card_ids, *, select=None, advance=None, use_actions=None, home_ok=True):
+    def _run(
+        self,
+        card_ids,
+        *,
+        select=None,
+        advance=None,
+        use_actions=None,
+        home_ok=True,
+        recovered=None,
+    ):
         events = []
         warnings = []
         home = (
@@ -53,6 +62,9 @@ class SkipBrokenCardTest(unittest.TestCase):
                 log_warning=lambda message, *_a, **_k: warnings.append(message),
                 info_set=lambda *_args: None,
             )
+            if recovered is not None:
+                # A real task: the general way home is tried after a skip.
+                task.capture_frame = lambda: None
 
             def default_select(card_id, *, enter_visually_complete):
                 events.append(("select", card_id))
@@ -92,7 +104,11 @@ class SkipBrokenCardTest(unittest.TestCase):
                 else default_use_actions
             )
             cards = tuple(CARD_BY_ID[card_id] for card_id in card_ids)
-            with patch("src.tasks.map_trade.collector.COLLECTABLE_CARDS", cards):
+            recover = lambda _task: events.append(("recover",)) or bool(recovered)  # noqa: E731
+            with (
+                patch("src.tasks.map_trade.collector.COLLECTABLE_CARDS", cards),
+                patch("src.tasks.recovery.recover_to_home", recover),
+            ):
                 result = collector.run()
             state = progress.state
         return result, events, warnings, state
@@ -149,6 +165,32 @@ class SkipBrokenCardTest(unittest.TestCase):
         self.assertIn("回不到主页", result.message)
         self.assertNotIn(("collect", "Q_sp2", "main_area"), events)
         self.assertEqual(1, events.count(("home",)))
+
+    def test_general_way_home_after_a_skip_lets_the_next_card_run(self):
+        # YES-BD2 #24: a map page left open after a skip stopped the whole
+        # run; Leo 2026-10-13 「能不能直接esc 然后换下一张卡带」.
+        def select(card_id, *, enter_visually_complete):
+            return NOT_FOUND if card_id == "Q_sp1" else ENTERED
+
+        result, events, warnings, state = self._run(
+            ("Q_sp1", "Q_sp2"), select=select, home_ok=False, recovered=True
+        )
+
+        self.assertIn(("recover",), events)
+        self.assertIn(("collect", "Q_sp2", "main_area"), events)
+        self.assertNotIn("回不到主页", result.message)
+        self.assertTrue(any("通用退出" in line for line in warnings))
+
+    def test_general_way_home_failing_still_stops_the_run(self):
+        result, events, _warnings, _state = self._run(
+            ("Q_sp1", "Q_sp2"),
+            select=lambda card_id, **_k: NOT_FOUND,
+            home_ok=False,
+            recovered=False,
+        )
+        self.assertIn(("recover",), events)
+        self.assertIn("回不到主页", result.message)
+        self.assertNotIn(("collect", "Q_sp2", "main_area"), events)
 
     def test_a_card_skipped_on_a_full_day_is_still_not_done(self):
         # The day's 吸收 runs out on the next card: the run says so, but the

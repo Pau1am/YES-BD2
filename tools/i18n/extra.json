@@ -1163,5 +1163,15 @@
   "en": "The game is in full screen and keeps filling the whole screen ({size}), so the tool can't resize it. In the game, open Settings → Graphics → Screen Mode, choose Windowed, then press Resize again.",
   "ja": "ゲームが全画面のため、画面いっぱい（{size}）に戻ってしまい、ツールではサイズを変えられません。ゲームの 設定 → グラフィック → 画面モード を「ウィンドウモード」にしてから、もう一度「調整」を押してください。",
   "ko": "게임이 전체 화면이라 화면 전체({size})로 되돌아가서 도구가 크기를 바꿀 수 없습니다. 게임에서 설정 → 그래픽 → 화면 모드를 「창 모드」로 바꾼 뒤 다시 「조정」을 누르세요."
+ },
+ "识别后等待秒数": {
+  "en": "Wait after recognition (seconds)",
+  "ja": "認識後の待ち時間（秒）",
+  "ko": "인식 후 대기 시간(초)"
+ },
+ "认出按钮后，点下去之前等多久（秒）。": {
+  "en": "How long to wait after a button is recognized before pressing it (seconds).",
+  "ja": "ボタンを認識してから押すまでの待ち時間（秒）。",
+  "ko": "버튼을 인식한 뒤 누르기 전까지 기다리는 시간(초)."
  }
 }

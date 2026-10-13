@@ -139,7 +139,7 @@ class OcrOverrideTest(unittest.TestCase):
 
 
 class LookAgainTest(unittest.TestCase):
-    """Slow PCs: nothing seen is looked at again for 2 s; something seen returns at once."""
+    """Slow PCs: nothing seen is looked at again for 5 s; something seen returns at once."""
 
     def setUp(self):
         self.task = object.__new__(BaseBD2Task)
@@ -157,8 +157,21 @@ class LookAgainTest(unittest.TestCase):
         self.assertEqual(len(self.slept), 3)
 
     def test_nothing_after_the_grace_returns_the_last_look(self):
-        self.assertIsNone(self.task.look_again(lambda: None, grace=2.0))
-        self.assertAlmostEqual(sum(self.slept), 2.0)
+        self.assertIsNone(self.task.look_again(lambda: None))
+        self.assertAlmostEqual(sum(self.slept), 5.0)
+
+    def test_a_popup_over_the_page_is_closed_and_the_page_looked_at_again(self):
+        closed = []
+        self.task.close_known_popup = lambda label="": closed.append(label) or len(closed) == 1
+        looks = iter([None] * 21 + ["战斗"])
+        self.assertEqual(self.task.look_again(lambda: next(looks), "战斗按钮"), "战斗")
+        self.assertEqual(closed, ["战斗按钮"])
+
+    def test_no_popup_means_one_popup_look_only(self):
+        closed = []
+        self.task.close_known_popup = lambda label="": closed.append(label) and False
+        self.assertIsNone(self.task.look_again(lambda: None, "战斗按钮"))
+        self.assertEqual(len(closed), 1)
 
 
 try:

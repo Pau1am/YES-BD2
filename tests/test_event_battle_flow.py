@@ -178,6 +178,105 @@ class WatchAutoBattleTest(unittest.TestCase):
         self.assertEqual(len(frames), self.consumed)
 
 
+class StuckPageGuardTest(unittest.TestCase):
+    """A player's v0.1.30 run stayed on the event page after 挑战15 was
+    cleared by hand, until stopped (Leo 2026-10-13 「把保護機制加上就好」)."""
+
+    def setUp(self):
+        self.now = 0.0
+        clock = mock.patch.object(event_module, "monotonic", side_effect=lambda: self.now)
+        clock.start()
+        self.addCleanup(clock.stop)
+
+        def capture(_task, _name=None):
+            self.now += 10.0
+            return None
+
+        frames = mock.patch.object(event_module._ClaimTaskBase, "capture_frame", capture)
+        frames.start()
+        self.addCleanup(frames.stop)
+        self.home = mock.patch.object(event_module, "recover_to_home", return_value=True)
+        self.recover = self.home.start()
+        self.addCleanup(self.home.stop)
+
+    def _task(self):
+        task = make_task()
+        task.name = "活动每日战斗"
+        task._save_flow_diagnostic = lambda name: None
+        task._settle_before_recovery = lambda: None
+        task.info_snapshot = lambda: dict(task.info)
+        return task
+
+    def test_a_page_that_never_moves_on_is_reported_as_stuck(self):
+        # BaseBD2Task._run_watched then goes home and runs the step once more.
+        from src.utils.frozen_screen import FrozenScreen
+
+        task = self._task()
+
+        def never_moves_on(mode):
+            while True:
+                task.capture_frame()
+
+        task._run_mode = never_moves_on
+        with self.assertRaises(FrozenScreen) as stuck:
+            task.run_claim()
+        self.assertLessEqual(self.now, event_module.PAGE_STUCK_SECONDS + 10.0)
+        self.assertIn("没走到下一步", str(stuck.exception))
+        self.assertIsNone(task._page_deadline)
+
+    def test_a_look_that_swallows_the_stop_does_not_turn_the_guard_off(self):
+        from src.utils.frozen_screen import FrozenScreen
+
+        task = self._task()
+
+        def swallowing_look(mode):
+            swallowed = False
+            for _ in range(10000):
+                if not swallowed:
+                    try:
+                        task.capture_frame()  # the shared popup check catches Exception
+                    except Exception:
+                        swallowed = True
+                        task._progressed()  # nor does a press right after it
+                else:
+                    task.capture_frame()
+            raise AssertionError("the guard stayed off after one swallowed stop")
+
+        task._run_mode = swallowing_look
+        with self.assertRaises(FrozenScreen):
+            task.run_claim()
+        self.assertIsNone(task._page_deadline)
+
+    def test_a_press_is_a_step(self):
+        task = self._task()
+        task._resume_guard()
+        self.now = event_module.PAGE_STUCK_SECONDS - 5.0
+        with mock.patch.object(event_module._ClaimTaskBase, "operate", lambda *a, **k: None):
+            task.operate(lambda: None)
+        self.now += event_module.PAGE_STUCK_SECONDS - 5.0
+        task.capture_frame()
+
+    def test_reaching_a_page_starts_the_count_over(self):
+        task = self._task()
+        task._resume_guard()
+        self.now = event_module.PAGE_STUCK_SECONDS - 20.0
+        task._progressed()
+        self.now += event_module.PAGE_STUCK_SECONDS - 20.0
+        task.capture_frame()
+        self.now += 20.0
+        with self.assertRaises(event_module._StuckOnEventPage):
+            task.capture_frame()
+
+    def test_no_guard_while_battles_run(self):
+        task = self._task()
+        task._resume_guard()
+        task._pause_guard()
+        self.now += 10 * event_module.PAGE_STUCK_SECONDS
+        task.capture_frame()
+        task._progressed()  # a battle's own result does not re-arm a paused guard
+        self.assertIsNone(task._page_deadline)
+
+
 if __name__ == "__main__":
     unittest.main()
 

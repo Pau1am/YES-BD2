@@ -153,6 +153,24 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual([], game.clicks)
         self.assertFalse(collector.skill_group_keeper.switched)
 
+    def test_the_group_found_last_time_is_tried_first(self):
+        # Leo 2026-10-13: his group 3 has no collection skills; every card
+        # flipped 3 -> 1 -> 2.  The second card goes straight to 2.
+        game, collector = _collector(3)
+        self.assertTrue(collector._open_skill_menu((SEARCH_ICON,), allow_group_one_recovery=True))
+        self.assertEqual(2, game.group)
+        game.group = 3
+        game.clicks.clear()
+        self.assertTrue(collector._open_skill_menu((SEARCH_ICON,), allow_group_one_recovery=True))
+        self.assertEqual([SKILL_GROUP_RELATIVE_POINTS[2]], game.clicks)
+
+    def test_the_group_on_screen_is_tried_last(self):
+        game, collector = _collector(1, skills_in=3)
+        self.assertTrue(collector._open_skill_menu((SEARCH_ICON,), allow_group_one_recovery=True))
+        self.assertEqual(
+            [SKILL_GROUP_RELATIVE_POINTS[2], SKILL_GROUP_RELATIVE_POINTS[3]], game.clicks
+        )
+
     def _run(self, collector, body):
         collector._run_collection = body
         collector._with_skipped_cards = lambda result: result
@@ -181,6 +199,91 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual([], game.clicks)
         self.assertEqual(2, game.group)
         self.assertIn("停止时技能组可能还在", game.logs[-1][1])
+
+
+class LastFieldTest(unittest.TestCase):
+    """The group kept for a next card that was then not entered is put back
+    on the last card entered (Leo's rule: never leave it changed)."""
+
+    def test_off_the_field_it_goes_back_to_the_last_card(self):
+        from src.tasks.map_trade.card_status import (
+            CollectionCardSelectionOutcome,
+            CollectionCardSelectionResult,
+        )
+
+        game, collector = _collector(3)
+        self.assertTrue(collector._open_skill_menu((SEARCH_ICON,), allow_group_one_recovery=True))
+        game.group = None  # the next card was complete: quick-switch page
+        entered, homes = [], []
+
+        def select(card_id, enter_visually_complete=False):
+            entered.append((card_id, enter_visually_complete))
+            game.group = 2
+            return CollectionCardSelectionResult(
+                CollectionCardSelectionOutcome.ENTERED, SimpleNamespace(success=True)
+            )
+
+        collector.navigator = SimpleNamespace(
+            select_collection_card=select, return_home=lambda: homes.append(1)
+        )
+        collector._last_field_card_id = "Q_sp9"
+        collector._restore_on_last_field()
+        self.assertEqual([("Q_sp9", True)], entered)
+        self.assertEqual(3, game.group)
+        self.assertEqual([1], homes)
+        self.assertFalse(collector.skill_group_keeper.switched)
+
+    def test_on_the_field_nothing_extra(self):
+        game, collector = _collector(3)
+        collector._open_skill_menu((SEARCH_ICON,), allow_group_one_recovery=True)
+        collector.navigator = SimpleNamespace(
+            select_collection_card=lambda *_a, **_k: self.fail("entered again")
+        )
+        collector._last_field_card_id = "Q_sp9"
+        collector._restore_on_last_field()
+
+
+class NextCardTest(unittest.TestCase):
+    """Leo 2026-10-13 「跑圖有時候跑完還會切我的工具列」: the group goes back
+    after the last card only, not after every card."""
+
+    def _collector(self, done_ids=(), depleted=False, can_finish=True):
+        from src.tasks.map_trade.models import COLLECTABLE_CARDS
+
+        collector = object.__new__(Collector)
+        state = SimpleNamespace(
+            depleted_today=depleted,
+            completed_targets=lambda card_id: (
+                {t.key for c in COLLECTABLE_CARDS if c.card_id == card_id for t in c.targets}
+                if card_id in done_ids
+                else set()
+            ),
+        )
+        collector.progress = SimpleNamespace(state=state)
+        collector._can_finish_card_today = lambda _card, _completed: can_finish
+        return collector, COLLECTABLE_CARDS
+
+    def test_a_card_to_come_keeps_the_group(self):
+        collector, cards = self._collector()
+        self.assertTrue(collector._another_card_follows(cards[0], 0, 0, None))
+
+    def test_the_last_card_puts_it_back(self):
+        collector, cards = self._collector(done_ids={c.card_id for c in cards_after(0)})
+        self.assertFalse(collector._another_card_follows(cards[0], 0, 0, None))
+
+    def test_limit_skills_or_depleted_put_it_back(self):
+        collector, cards = self._collector()
+        self.assertFalse(collector._another_card_follows(cards[0], 1, 2, None))
+        collector, cards = self._collector(can_finish=False)
+        self.assertFalse(collector._another_card_follows(cards[0], 0, 0, None))
+        collector, cards = self._collector(depleted=True)
+        self.assertFalse(collector._another_card_follows(cards[0], 0, 0, None))
+
+
+def cards_after(index):
+    from src.tasks.map_trade.models import COLLECTABLE_CARDS
+
+    return COLLECTABLE_CARDS[index + 1 :]
 
 
 if __name__ == "__main__":

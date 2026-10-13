@@ -66,8 +66,21 @@ class RowHeaderTest(unittest.TestCase):
 class _Game:
     """主页 → (P) → 珍藏集; every OCR read returns the current screen's boxes."""
 
-    def __init__(self, test, *, home=True, opens=True, row_after_scrolls=0, keycaps=True):
+    def __init__(
+        self,
+        test,
+        *,
+        home=True,
+        opens=True,
+        row_after_scrolls=0,
+        keycaps=True,
+        card_swallows=0,
+        key_opens=False,
+    ):
         self.test = test
+        self.key_opens = key_opens
+        self.keys = []
+        self.card_swallows = card_swallows
         self.keycaps = keycaps
         self.screen = "home" if home else "other"
         self.opens = opens
@@ -87,6 +100,7 @@ class _Game:
         task._wait_for_cartridge_home = lambda: self.screen == "home"
         task._home_machine_keycaps_steady = lambda: self.keycaps
         task._click_reference = self.click
+        task.tap_key = self.tap
         task.scroll_client = lambda _point, amount, after_sleep=0.0: self.scrolls.append(amount)
         task._ocr_text = lambda _frame, name, roi=None, **_kw: (
             "游戏卡珍藏集" if self.screen == "collection" else ""
@@ -101,7 +115,16 @@ class _Game:
         if (x, y) == HOME_CARTRIDGE_MACHINE_POINT and self.opens:
             self.screen = "collection"
         elif self.screen == "collection":
-            self.screen = "pvp"
+            if self.card_swallows > 0:
+                self.card_swallows -= 1
+            else:
+                self.screen = "pvp"
+
+    def tap(self, key, after_sleep=0.0):
+        self.keys.append(key)
+        if key == "P" and self.screen == "home" and self.key_opens:
+            self.screen = "collection"
+        return True
 
     def boxes(self):
         if self.screen != "collection":
@@ -125,6 +148,7 @@ class PvpEntryTest(unittest.TestCase):
         game = _Game(self)
         self.assertTrue(PVPTask._enter_pvp_from_home(game.task()))
         self.assertEqual([HOME_CARTRIDGE_MACHINE_POINT, (265, 450)], game.clicks)
+        self.assertEqual([], game.keys)
         self.assertNotIn(RETURN_TO_FIELD_POINT, game.clicks)
         self.assertEqual([], game.scrolls)
 
@@ -140,7 +164,39 @@ class PvpEntryTest(unittest.TestCase):
         task = game.task()
         self.assertFalse(PVPTask._enter_pvp_from_home(task))
         self.assertEqual([HOME_CARTRIDGE_MACHINE_POINT] * 2, game.clicks)
+        self.assertEqual(["P"], game.keys)
         self.assertIn("没看到游戏卡珍藏集", task.log_info.call_args_list[-2].args[0])
+
+    def test_two_swallowed_machine_presses_fall_back_to_the_p_key(self):
+        # Leo 10-13: 「p如果還沒按到 也可以點快捷鍵」.
+        game = _Game(self, opens=False, key_opens=True)
+        task = game.task()
+        self.assertTrue(PVPTask._enter_pvp_from_home(task))
+        self.assertEqual([HOME_CARTRIDGE_MACHINE_POINT] * 2 + [(265, 450)], game.clicks)
+        self.assertEqual(["P"], game.keys)
+        self.assertTrue(
+            any("快捷键 P" in call.args[0] for call in task.log_info.call_args_list)
+        )
+
+    def test_the_p_key_waits_for_home_again(self):
+        game = _Game(self, opens=False, key_opens=True)
+        task = game.task()
+        checks = iter([True, True, False])
+        task._wait_for_cartridge_home = lambda: next(checks)
+        self.assertFalse(PVPTask._enter_pvp_from_home(task))
+        self.assertEqual([], game.keys)
+
+    def test_a_swallowed_card_press_is_made_once_more(self):
+        # Player 2026-10-13 (v0.1.30): one press on 镜中之战 left 游戏卡珍藏集 up.
+        game = _Game(self, card_swallows=1)
+        task = game.task()
+        self.assertTrue(PVPTask._enter_pvp_from_home(task))
+        self.assertEqual([HOME_CARTRIDGE_MACHINE_POINT, (265, 450), (265, 450)], game.clicks)
+
+    def test_the_card_is_pressed_twice_at_most(self):
+        game = _Game(self, card_swallows=99)
+        self.assertFalse(PVPTask._enter_pvp_from_home(game.task()))
+        self.assertEqual([HOME_CARTRIDGE_MACHINE_POINT, (265, 450), (265, 450)], game.clicks)
 
     def test_the_shelf_is_scrolled_until_the_battle_row_shows(self):
         game = _Game(self, row_after_scrolls=3)

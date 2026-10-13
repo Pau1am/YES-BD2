@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from src.utils.colour_check import COLOUR_DISTANCE_MAX, check_capture_colours
-from src.utils.colour_rules import switch_yellow_ratio
+from src.utils.colour_rules import switch_knob_side, switch_yellow_ratio
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ANCHORS = Path(__file__).resolve().parents[1] / "recognition-assets" / "template-assets" / "colour_check"
@@ -72,6 +72,49 @@ class YellowSwitchTest(unittest.TestCase):
         ):
             self.assertGreater(switch_yellow_ratio(fn(on)), 0.15, name)
             self.assertEqual(0.0, switch_yellow_ratio(fn(off)), name)
+
+
+class SwitchKnobTest(unittest.TestCase):
+    """Leo's 1080p PVP 自动战斗 dialog: 仅使用免费鲜血鸡尾酒 off, 自动跳过战斗 on.
+
+    Crops of the switch area (1260,401 / 1260,500, 90x41); the switch middle
+    is at x 41.5 in the crop.
+    """
+
+    MIDDLE = 41.5
+
+    def test_the_knob_side_survives_brighter_darker_and_saturated(self):
+        off = cv2.imread(str(FIXTURES / "pvp" / "free_ap_switch_off_fhd.png"))
+        on = cv2.imread(str(FIXTURES / "pvp" / "auto_skip_switch_on_fhd.png"))
+        for name, fn in (
+            ("none", lambda f: f),
+            ("hdr", hdr_washout),
+            ("darker", darker),
+            (
+                "dim",
+                lambda f: cv2.LUT(f, _lut(lambda v: _linear_to_srgb(_srgb_to_linear(v) / 1.5))),
+            ),
+            ("saturated", saturated),
+        ):
+            self.assertEqual("off", switch_knob_side(fn(off), self.MIDDLE), name)
+            self.assertEqual("on", switch_knob_side(fn(on), self.MIDDLE), name)
+
+    def test_the_knob_side_at_other_sizes(self):
+        off = cv2.imread(str(FIXTURES / "pvp" / "free_ap_switch_off_fhd.png"))
+        on = cv2.imread(str(FIXTURES / "pvp" / "auto_skip_switch_on_fhd.png"))
+        for scale in (2 / 3, 4 / 3, 2.0):
+            size = (round(off.shape[1] * scale), round(off.shape[0] * scale))
+            with self.subTest(scale=scale):
+                middle = self.MIDDLE * scale
+                self.assertEqual("off", switch_knob_side(cv2.resize(off, size), middle))
+                self.assertEqual("on", switch_knob_side(cv2.resize(on, size), middle))
+
+    def test_no_knob_reads_as_unclear(self):
+        self.assertIsNone(switch_knob_side(np.full((41, 90, 3), 40, np.uint8), self.MIDDLE))
+        self.assertIsNone(switch_knob_side(np.full((41, 90, 3), 230, np.uint8), self.MIDDLE))
+        knob_in_the_middle = np.full((41, 90, 3), 40, np.uint8)
+        cv2.circle(knob_in_the_middle, (41, 20), 10, (240, 240, 240), -1)
+        self.assertIsNone(switch_knob_side(knob_in_the_middle, self.MIDDLE))
 
 
 class CaptureColourCheckTest(unittest.TestCase):
