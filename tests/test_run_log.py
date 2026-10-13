@@ -60,6 +60,17 @@ class RunLogTest(unittest.TestCase):
         entries = run_log.entries(folder=self.path)
         self.assertEqual(["领取邮件"], [entry["name"] for entry in entries])
 
+    def test_a_note_added_while_running_stays_on_a_done_row(self):
+        run_report.set_report_file(str(Path(self.path, "reports.json")))
+        run_report.begin("一键完成日常", "all", [("k", "爛装强化分解")])
+        run_report.add_current_note("not running yet")  # no current row: dropped
+        run_report.row_started("k")
+        run_report.add_current_note("新装备 2 件都没拆")
+        run_report.row_ended("k", run_report.DONE)
+        report = run_report.finish(run_report.ENDED_DONE)
+        self.assertEqual("新装备 2 件都没拆", report["rows"][0]["note"])
+        self.assertEqual("新装备 2 件都没拆", run_log.entries(folder=self.path)[0]["note"])
+
     def test_week_seconds_counts_this_game_week_only(self):
         start = week_start_ts(time.time())
         # Sunday night, before Monday's reset: last week.

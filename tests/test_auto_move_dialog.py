@@ -58,6 +58,41 @@ class AutoMoveQuestionTest(unittest.TestCase):
         self.assertEqual([], clicks)
 
 
+class MapLeftOpenAfterWalkTest(unittest.TestCase):
+    """A player 2026-10-13 (v0.1.31, card 7): after 确认 on the 自动移动
+    dialog the large map stayed up and nothing else happened."""
+
+    def _navigator(self, map_looks):
+        looks = iter(map_looks)
+        closed = []
+        navigator = Navigator(
+            SimpleNamespace(sleep=lambda *_a: None),
+            SimpleNamespace(capture=lambda: "frame"),
+        )
+        navigator._status = lambda *_a: None
+        navigator._sandbox_navigation_page_has_keyword = lambda _frame: next(looks, True)
+        navigator._close_confirmed_map_page = lambda modes, **_k: closed.append(modes)
+        return navigator, closed
+
+    def test_a_map_that_stays_is_closed(self):
+        navigator, closed = self._navigator((True, True, True))
+
+        self.assertTrue(navigator._close_map_left_open_by_walk())
+        self.assertEqual([{MapPageMode.SANDBOX_LARGE_MAP}], closed)
+
+    def test_a_map_that_closes_by_itself_is_left_alone(self):
+        navigator, closed = self._navigator((True, False))
+
+        self.assertFalse(navigator._close_map_left_open_by_walk())
+        self.assertEqual([], closed)
+
+    def test_the_field_is_left_alone(self):
+        navigator, closed = self._navigator((False,))
+
+        self.assertFalse(navigator._close_map_left_open_by_walk())
+        self.assertEqual([], closed)
+
+
 @unittest.skipIf(ONNXPaddleOcr is None, "onnxocr not installed")
 class PlayerFramesTest(unittest.TestCase):
     @classmethod

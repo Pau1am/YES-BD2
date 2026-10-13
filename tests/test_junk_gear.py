@@ -1243,6 +1243,41 @@ class AfterGachaNewMarkedTest(unittest.TestCase):
         self.assertTrue(task.run_claim())
         task._read_bag_filter.assert_called_once()
 
+    def test_new_items_all_kept_are_written_in_the_report(self):
+        # Leo 2026-10-13 「如果真的有這種情況 報表要寫」.
+        from unittest import mock
+
+        task = self._task([(0, 0), (0, 1), (0, 2)])
+
+        def kept_all(cells, stars, frame, grade="R"):
+            task.judged.append((grade, list(cells)))
+            task._kept_reasons = ["UR", "UR", "稀有度认不出"] if grade is None else []
+            return []
+
+        task._classify_cells = kept_all
+        with mock.patch("src.tasks.JunkGearTask.run_report.add_current_note") as note:
+            self.assertTrue(task.run_claim())
+        note.assert_called_once_with("新装备 3 件都没拆；保留：UR 2 件、稀有度认不出 1 件")
+
+    def test_new_junk_not_dismantled_says_so_in_the_report(self):
+        from unittest import mock
+
+        task = self._task([(0, 0)])
+        task._enhance_and_dismantle = mock.Mock(return_value=None)
+        with mock.patch("src.tasks.JunkGearTask.run_report.add_current_note") as note:
+            self.assertTrue(task.run_claim())
+        self.assertEqual(
+            "新装备 1 件都没拆；认出 1 件爛装，一键强化没选成没拆", note.call_args_list[0].args[0]
+        )
+
+    def test_new_items_dismantled_add_no_note(self):
+        from unittest import mock
+
+        task = self._task([(0, 0)])
+        with mock.patch("src.tasks.JunkGearTask.run_report.add_current_note") as note:
+            self.assertTrue(task.run_claim())
+        note.assert_not_called()
+
     def test_not_after_the_gacha_skips_the_marked_pass(self):
         task = self._task([(0, 0)], after_gacha=False)
         self.assertTrue(task.run_claim())
@@ -1259,20 +1294,23 @@ class AfterGachaNewMarkedTest(unittest.TestCase):
         task._dismantle_crafted_n = mock.Mock(return_value=True)
         return task
 
-    def test_the_filter_pass_only_gets_what_the_marked_pass_left(self):
-        # Leo 2026-10-11 「處理的件數都不可以超過設定裡面的件數」
+    def test_marked_items_only_looked_at_leave_the_count_to_the_filter(self):
+        # Player 2026-10-13: ten new items with 「!」, none junk, used up
+        # 最多处理件数, so 一键日常 showed 完成 in 20 s and nothing was
+        # dismantled; on its own the same bag was dismantled.  Kept items
+        # are not handled ones (the card: 「没有拆到时，背包先筛选出 R…」).
         task = self._counted([(0, 0), (0, 1), (0, 2)], cap=5)
         self.assertTrue(task.run_claim())
-        self.assertEqual(2, task._front_items.call_args_list[0].args[0])
+        self.assertEqual(5, task._front_items.call_args_list[0].args[0])
         for call in task._front_items.call_args_list:
-            self.assertLessEqual(call.args[0], 2)
+            self.assertLessEqual(call.args[0], 5)
         task._dismantle_crafted_n.assert_called_once()
 
-    def test_no_filter_pass_and_no_n_item_once_the_count_is_used_up(self):
+    def test_a_full_count_of_kept_new_items_still_runs_the_filter(self):
         task = self._counted([(0, 0), (0, 1)], cap=2)
         self.assertTrue(task.run_claim())
-        task._front_items.assert_not_called()
-        task._dismantle_crafted_n.assert_not_called()
+        task._front_items.assert_called()
+        self.assertEqual(2, task._front_items.call_args_list[0].args[0])
 
 
 class NewMarkedLiveTest(unittest.TestCase):
