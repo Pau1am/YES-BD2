@@ -1228,5 +1228,20 @@
   "en": "\"Remote Desktop Services\" is on. Press \"Run on Clone Desktop\" again",
   "ja": "「リモート デスクトップ サービス」を有効にしました。もう一度「分身デスクトップで実行」を押してください",
   "ko": "'원격 데스크톱 서비스'를 켰습니다. '분신 데스크톱에서 실행'을 다시 누르세요"
+ },
+ "切换版本": {
+  "en": "Switch version",
+  "ja": "バージョン切り替え",
+  "ko": "버전 전환"
+ },
+ "包含测试版": {
+  "en": "Include test versions",
+  "ja": "テスト版を含める",
+  "ko": "테스트 버전 포함"
+ },
+ "检查更新": {
+  "en": "Check for updates",
+  "ja": "アップデートを確認",
+  "ko": "업데이트 확인"
  }
 }

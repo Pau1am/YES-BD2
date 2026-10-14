@@ -463,7 +463,11 @@
   "知道了": "Got it",
   "双倍时米饭打哪里，现在可以自己选，也能打狩猎场。设定在「任务设定」里。": "You can now choose where rice goes on double days, Hunting Ground included. It's under \"Task Setup\".",
   "双倍时米饭打哪里": "Where rice goes on double days",
-  "每行选一个：金币、史莱姆或狩猎场，都用 MAX。已照你原本的设定开好，确认一下就好。": "Pick one per row: Gold, Slime or Hunting Ground, always MAX. Already set to match your old settings, just check them."
+  "每行选一个：金币、史莱姆或狩猎场，都用 MAX。已照你原本的设定开好，确认一下就好。": "Pick one per row: Gold, Slime or Hunting Ground, always MAX. Already set to match your old settings, just check them.",
+  "战斗倍数": "Multiplier",
+  "倍": "x",
+  "场": "battles",
+  "{used} / {free} 杯": "{used} / {free} cups"
  },
  "not_on_souseha": {
   "小屋": "House",

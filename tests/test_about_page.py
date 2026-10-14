@@ -86,6 +86,7 @@ class AboutPageTest(unittest.TestCase):
         texts = list(NOTICE) + [credit.what for credit in CREDITS]
         texts += ["关于", "版本、更新和致谢", "使用须知", "致谢（参考或使用了这些项目）"]
         texts += ["BD2DB 图鉴", "跑商售卖物品表", "思源黑体 Noto Sans", "版本 {version}"]
+        texts += ["切换版本", "包含测试版", "检查更新", "BD2 自动日常"]
         for language in ("en_US", "ja_JP", "ko_KR"):
             catalog = gettext.translation("ok", CATALOG_ROOT, languages=[language])
             for text in texts:
@@ -178,11 +179,65 @@ class AboutPageTest(unittest.TestCase):
     def test_source_checkout_has_no_update_controls_but_a_github_row(self):
         page = AboutPage(SimpleNamespace(about_tab=None))
         self.assertIsNone(page.update_card)
+        self.assertTrue(page.check_button.isHidden())
         self.assertEqual(about_page.PROJECT_URL, "https://github.com/nobell001/YES-BD2")
         urls = [row.url for row in page.findChildren(about_page.LinkRow)]
         self.assertEqual(len(urls), len(CREDITS) + 1)
         self.assertIn(about_page.PROJECT_URL, urls)
         self.assertNotIn("", urls)
+
+    def test_ok_update_controls_sit_in_the_update_card(self):
+        # Leo 2026-10-14 (方案 B): status by the 检查更新 button, 切换版本 below,
+        # no greyed 「目前版本」 button.
+        from ok.ui.qt.about.UpdateCard import UpdateCard
+
+        launcher = SimpleNamespace(
+            app_version="v0.1.34",
+            get_version_list=lambda **_: [],
+            is_greater_version=lambda a, b: a > b,
+            calculate_update_notes=lambda *_: ["新"],
+        )
+        card = UpdateCard("v0.1.34", launcher)
+        window = SimpleNamespace(about_tab=SimpleNamespace(update_card=card))
+        page = AboutPage(window)
+        page.resize(1200, 900)
+        page.show()
+        self.app.processEvents()
+        self.assertTrue(page.isAncestorOf(card))
+        self.assertFalse(card.isVisible())
+        for widget in (card.version_combo, card.test_version_checkbox):
+            self.assertTrue(page.version_strip.isAncestorOf(widget))
+        self.assertFalse(page.status_text.isVisible())
+
+        card._apply_versions((True, [{"version": "v0.1.35"}, {"version": "v0.1.34"}]))
+        self.app.processEvents()
+        self.assertTrue(page.update_pill.isVisible())
+        self.assertTrue(page.apply_button.isVisible())
+        self.assertEqual(card.update_button.text(), page.apply_button.text())
+        self.assertTrue(page.switch_label.isVisible())
+        with mock.patch.object(card, "update_to_selected_version") as update:
+            card.update_button.clicked.disconnect()
+            card.update_button.clicked.connect(update)
+            page.apply_button.click()
+        update.assert_called_once()
+        card.version_combo.setCurrentIndex(1)
+        self.app.processEvents()
+        self.assertFalse(page.apply_button.isVisible())
+
+        card._apply_versions((True, [{"version": "v0.1.34"}]))
+        self.app.processEvents()
+        self.assertEqual("ok", page.status_text.property("role"))
+        self.assertTrue(page.status_text.isVisible())
+        self.assertTrue(page.status_icon.isVisible())
+        self.assertFalse(page.error_text.isVisible())
+
+        card._apply_versions((False, "boom"))
+        self.app.processEvents()
+        self.assertTrue(page.error_text.isVisible())
+        self.assertIn("boom", page.error_text.text())
+        self.assertFalse(page.status_text.isVisible())
+        self.assertFalse(page.status_icon.isVisible())
+        page.close()
 
 
 if __name__ == "__main__":
