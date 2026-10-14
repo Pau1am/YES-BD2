@@ -265,7 +265,7 @@ class AfterDefeatFlowTest(unittest.TestCase):
 class ChallengeCapTest(unittest.TestCase):
     def test_cap_limits_the_chain(self):
         task = AfterDefeatFlowTest._mode_task(
-            self, state(stage=8), state(stage=10), {CHALLENGE_CAP_KEY: 10}, defeated=False
+            self, state(stage=8), state(stage=10), {CHALLENGE_CAP_KEY: "10"}, defeated=False
         )
         task._stable_stage_state = mock.Mock(
             side_effect=[state(stage=8), state(stage=11), state(stage=11)]
@@ -274,24 +274,28 @@ class ChallengeCapTest(unittest.TestCase):
         self.assertEqual(3, task.asked)  # stages 8, 9, 10
 
     def test_a_stage_past_the_cap_is_not_fought(self):
-        task = make_task({CHALLENGE_CAP_KEY: 10})
+        task = make_task({CHALLENGE_CAP_KEY: "10"})
         task._open_mode = lambda mode: "ok"
         task._stable_stage_state = lambda mode: state(stage=12)
         task._auto_battle = lambda *a: self.fail("fought past the cap")
         self.assertEqual("capped", task._run_mode(CHALLENGE_MODE))
 
     def test_cap_does_not_touch_normal(self):
-        task = make_task({CHALLENGE_CAP_KEY: 3})
+        task = make_task({CHALLENGE_CAP_KEY: "5"})
         self.assertEqual(15, task._stage_cap(NORMAL_MODE))
-        self.assertEqual(3, task._stage_cap(CHALLENGE_MODE))
+        self.assertEqual(5, task._stage_cap(CHALLENGE_MODE))
 
-    def test_cap_is_kept_within_the_stages(self):
-        self.assertEqual(1, make_task({CHALLENGE_CAP_KEY: 0})._stage_cap(CHALLENGE_MODE))
-        self.assertEqual(15, make_task({CHALLENGE_CAP_KEY: 99})._stage_cap(CHALLENGE_MODE))
-        self.assertEqual(15, make_task({CHALLENGE_CAP_KEY: "x"})._stage_cap(CHALLENGE_MODE))
+    def test_cap_is_one_of_the_quick_battle_stages(self):
+        # Leo 2026-10-14 「快速戰鬥只能選 5 10 15」.
+        cap = lambda value: make_task({CHALLENGE_CAP_KEY: value})._stage_cap(CHALLENGE_MODE)
+        self.assertEqual(10, cap("10"))
+        self.assertEqual(10, cap(12))  # an older free number rounds down
+        self.assertEqual(5, cap(3))
+        self.assertEqual(15, cap(99))
+        self.assertEqual(15, cap("x"))
 
     def test_capped_run_quick_battles_the_cap_stage(self):
-        task = make_task({CHALLENGE_CAP_KEY: 10})
+        task = make_task({CHALLENGE_CAP_KEY: "10"})
         task._run_mode = lambda mode: "cleared" if mode == NORMAL_MODE else "capped"
         quick = []
         task._run_quick_battle = lambda mode, stage: quick.append((mode, stage)) or "done"
@@ -300,7 +304,7 @@ class ChallengeCapTest(unittest.TestCase):
         self.assertEqual([(CHALLENGE_MODE, 10)], quick)
 
     def test_cleared_stage_at_the_cap_is_capped_not_walked_past(self):
-        task = make_task({CHALLENGE_CAP_KEY: 10})
+        task = make_task({CHALLENGE_CAP_KEY: "10"})
         task._open_mode = lambda mode: "ok"
         task._stable_stage_state = lambda mode: state(stage=10, auto=False, quick=True)
         task._select_stage = lambda *a: self.fail("selected a stage past the cap")
@@ -343,6 +347,106 @@ class QuickBattleStageTest(unittest.TestCase):
         task._select_stage = lambda *a: False
         task._open_quick_dialog = lambda: self.fail("opened on the wrong stage")
         self.assertEqual("skipped", task._run_quick_battle(CHALLENGE_MODE, 10))
+
+
+class QuickStageBackupTest(unittest.TestCase):
+    """A player (2026-10-14, version unknown): both modes cleared, no 快速战斗
+    pressed.  Inferred: stage 15 was not selected (another stage kept by the
+    game, or 15 below the list's visible part)."""
+
+    def _task(self, selectable, start=12):
+        task = make_task()
+        task.page = state(stage=start, auto=False, quick=False)
+        task._stable_stage_state = lambda mode: dict(task.page)
+        task.scrolls = 0
+        task.tried = []
+
+        def select(mode, current, target, grace=5.0):
+            task.tried.append(target)
+            if target in selectable(task.scrolls):
+                task.page = state(stage=target, auto=False, quick=True)
+                return True
+            return False
+
+        task._select_stage = select
+
+        def scroll(point, amount, count=1, after_sleep=0):
+            task.scrolls += 1
+
+        task.scroll_client = scroll
+        return task
+
+    def test_the_list_is_scrolled_to_find_stage_15(self):
+        task = self._task(lambda scrolls: {15} if scrolls >= 1 else set())
+        picked = task._pick_quick_stage(CHALLENGE_MODE, task.page, 15)
+        self.assertEqual(15, picked[1])
+        self.assertEqual(1, task.scrolls)
+
+    def test_never_another_stage_when_15_cannot_be_selected(self):
+        # Leo 2026-10-14 「不能去改打第10第5」.
+        task = self._task(lambda scrolls: {10, 5})
+        self.assertIsNone(task._pick_quick_stage(CHALLENGE_MODE, task.page, 15))
+        self.assertEqual([15, 15, 15], task.tried)
+
+    def test_a_page_opened_on_another_stage_selects_15(self):
+        # Up to v0.1.32 this skipped quick battle (inferred cause).
+        task = self._task(lambda scrolls: {15}, start=10)
+        task.page = state(stage=10, auto=False, quick=True)
+        picked = task._pick_quick_stage(CHALLENGE_MODE, task.page, 15)
+        self.assertEqual(15, picked[1])
+        self.assertEqual(0, task.scrolls)
+
+    def test_nothing_selectable_is_reported(self):
+        task = make_task()
+        task._run_mode = lambda mode: "cleared"
+        task._run_quick_battle = lambda mode, stage: "skipped"
+        task._finish = lambda message: True
+        with mock.patch.object(event_module.run_report, "add_current_note") as note:
+            self.assertTrue(task.run_claim())
+        text = note.call_args.args[0]
+        self.assertIn("没选到第15关", text)
+        self.assertIn("活动AP没用掉", text)
+
+
+class NoQuickBeforeTheTargetTest(unittest.TestCase):
+    """Leo 2026-10-14: progress at 10, cap 15 -> never quick-battle 10."""
+
+    def test_a_cleared_10_whose_next_stage_cannot_be_selected_is_not_all_cleared(self):
+        task = make_task({CHALLENGE_CAP_KEY: "15"})
+        task._open_mode = lambda mode: "ok"
+        task._stable_stage_state = lambda mode: state(stage=10, auto=False, quick=True)
+        task._select_stage = lambda *a, **k: False
+        task.scroll_client = lambda *a, **k: None
+        self.assertEqual("stuck", task._run_mode(CHALLENGE_MODE))
+
+    def test_stuck_ends_the_run_without_quick_battle_and_says_why(self):
+        task = make_task()
+
+        opened = []
+
+        def run_mode(mode):
+            opened.append(mode)
+            task._stuck_stage = 10
+            return "stuck"
+
+        task._run_mode = run_mode
+        task._run_quick_battle = lambda *a: self.fail("quick battle before stage 15")
+        task._finish = lambda message: True
+        with mock.patch.object(event_module.run_report, "add_current_note") as note:
+            self.assertTrue(task.run_claim())
+        self.assertEqual([NORMAL_MODE, CHALLENGE_MODE], opened)  # challenge still pushed
+        self.assertIn("停在第10关", note.call_args.args[0])
+        self.assertIn("活动AP留着没用", note.call_args.args[0])
+
+    def test_quick_battle_never_runs_on_a_stage_still_to_clear(self):
+        # Stage 15 selected but not cleared shows 自动战斗: not quick-battled.
+        task = make_task()
+        task._select_stage = lambda *a, **k: True
+        task.scroll_client = lambda *a, **k: None
+        task._stable_stage_state = lambda mode: state(stage=15, auto=True, quick=False)
+        self.assertIsNone(
+            task._pick_quick_stage(CHALLENGE_MODE, state(stage=10, auto=False, quick=True), 15)
+        )
 
 
 class ShortWaitsTest(unittest.TestCase):
@@ -395,11 +499,37 @@ class ShortWaitsTest(unittest.TestCase):
 
 
 class SettingsTest(unittest.TestCase):
-    def test_new_settings_have_defaults_and_a_range(self):
+    def test_new_settings_have_defaults_and_choices(self):
         task = EventBattleTask(executor=SimpleNamespace(scene=None), app=SimpleNamespace())
         self.assertIs(False, task.default_config[NORMAL_ONLY_KEY])
-        self.assertEqual(15, task.default_config[CHALLENGE_CAP_KEY])
-        self.assertEqual({"min": 1, "max": 15, "step": 1}, task.config_type[CHALLENGE_CAP_KEY])
+        self.assertEqual("15", task.default_config[CHALLENGE_CAP_KEY])
+        self.assertEqual(["5", "10", "15"], task.config_type[CHALLENGE_CAP_KEY]["options"])
+
+    def test_quick_battle_cannot_be_turned_off(self):
+        # Leo 2026-10-14 「全部通關後快速戰鬥這個關掉 不讓用戶取消」.
+        task = EventBattleTask(executor=SimpleNamespace(scene=None), app=SimpleNamespace())
+        self.assertNotIn("全部通关后快速战斗", task.default_config)
+
+    def test_the_cap_row_hides_while_only_normal_is_fought(self):
+        from src.ui.shell import config_form
+
+        task = EventBattleTask(executor=SimpleNamespace(scene=None), app=SimpleNamespace())
+        rules = config_form.parents(task)
+        task.config = {NORMAL_ONLY_KEY: True, CHALLENGE_CAP_KEY: "10"}
+        self.assertFalse(config_form.condition_met(task, CHALLENGE_CAP_KEY, rules))
+        task.config = {NORMAL_ONLY_KEY: False, CHALLENGE_CAP_KEY: "10"}
+        self.assertTrue(config_form.condition_met(task, CHALLENGE_CAP_KEY, rules))
+
+    def test_normal_only_ignores_a_set_cap(self):
+        task = make_task({NORMAL_ONLY_KEY: True, CHALLENGE_CAP_KEY: "10"})
+        opened = []
+        task._run_mode = lambda mode: opened.append(mode) or "cleared"
+        quick = []
+        task._run_quick_battle = lambda mode, stage: quick.append((mode, stage)) or "done"
+        task._finish = lambda message: True
+        self.assertTrue(task.run_claim())
+        self.assertEqual([NORMAL_MODE], opened)
+        self.assertEqual([(NORMAL_MODE, 15)], quick)
 
 
 try:

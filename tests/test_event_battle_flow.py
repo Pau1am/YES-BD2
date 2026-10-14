@@ -389,10 +389,12 @@ class FailReasonTest(unittest.TestCase):
 
         return problem_report._stage(task)
 
-    def test_unread_ap_is_named(self):
-        # An unread AP with 自动战斗 shown now opens the dialog (Leo 2026-10-10,
-        # tests/test_event_battle_ap.py); 快速战斗 still needs the AP read.
+    def test_quick_dialog_not_opening_is_named(self):
+        # An unread AP now opens the dialog for 快速战斗 too (player's v0.1.32
+        # run, 2026-10-14); a dialog that never opens says so.
         task = self._task()
+        task._open_quick_dialog = lambda: False
+        task._sleep_after_recognition = lambda: None
         task._open_mode = lambda mode: "ok"
         task._stable_stage_state = lambda mode: {
             "stage": 15,
@@ -402,10 +404,10 @@ class FailReasonTest(unittest.TestCase):
             "quick": True,
         }
         self.assertFalse(task.run_claim())
-        line = "活动每日战斗：挑战战斗15快速战斗失败：挑战战斗关卡页上方的活动AP没读到。"
+        line = "活动每日战斗：挑战战斗15快速战斗失败：按了「快速战斗」，窗口没打开。"
         self.assertEqual(line, task.info["状态"])
         self.assertEqual(
-            "挑战战斗15快速战斗失败：挑战战斗关卡页上方的活动AP没读到", self._summary_stage(task)
+            "挑战战斗15快速战斗失败：按了「快速战斗」，窗口没打开", self._summary_stage(task)
         )
         task.log_warning.assert_called_once_with(line)
 

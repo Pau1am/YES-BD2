@@ -148,13 +148,28 @@ class DoubleCheckTest(unittest.TestCase):
         self.assertIsNone(task._set_dialog_count(5, state(free_ap=3)))
         self.assertIn("免费AP 3", task._why)
 
-    def test_quick_battle_still_needs_the_ap(self):
+    def test_quick_battle_with_unread_ap_opens_the_dialog(self):
+        # A player's v0.1.32 run (1921x1080, 150%, 2026-10-14) stopped
+        # 「挑战战斗关卡页上方的活动AP没读到」 with both modes cleared.
         task = make_task()
         task._open_mode = lambda mode: "ok"
         task._stable_stage_state = lambda mode: state(15, free_ap=None, auto=False, quick=True)
-        task._open_quick_dialog = lambda: self.fail("quick dialog opened without the AP")
-        self.assertEqual("failed", task._run_quick_battle())
-        self.assertEqual("挑战战斗关卡页上方的活动AP没读到", task._why)
+        asked = []
+        task._open_quick_dialog = lambda: True
+        task._set_quick_count = lambda wanted, read: asked.append(wanted) or 0
+        task._click_reference = lambda *a, **k: None
+        self.assertEqual("no_ap", task._run_quick_battle())
+        self.assertEqual([5], asked)
+
+    def test_quick_count_with_unread_ap_trusts_the_switch_and_max(self):
+        task = self._dialog_task(costs=(4,))
+        task._max_count = lambda point, read: 4
+        self.assertEqual(4, task._set_quick_count(5, state(free_ap=None)))
+
+    def test_quick_count_with_unread_ap_needs_the_switch(self):
+        task = self._dialog_task(switch_on=False)
+        task._max_count = lambda point, read: self.fail("pressed MAX with the switch off")
+        self.assertIsNone(task._set_quick_count(5, state(free_ap=None)))
 
 
 class CountFromTheDialogTest(unittest.TestCase):
@@ -312,9 +327,10 @@ class ClearedStageSelectedTest(unittest.TestCase):
         self.assertEqual([11], task.fought)
 
     def test_a_next_stage_that_does_not_open_reads_as_before(self):
-        # A locked stage: the click changes nothing, the mode counts as cleared.
+        # A locked stage: the click changes nothing.  Not "cleared" any more
+        # (Leo 2026-10-14: no quick battle before the set stage is reached).
         task = self._task(after_click=10)
-        self.assertEqual("cleared", task._run_mode("普通战斗"))
+        self.assertEqual("stuck", task._run_mode("普通战斗"))
         self.assertEqual([], task.fought)
 
     def test_stage_15_cleared_is_all_cleared_without_a_click(self):

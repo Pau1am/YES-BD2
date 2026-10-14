@@ -1189,10 +1189,10 @@
   "ja": "チャレンジ戦闘は一切行いません。ノーマル戦闘クリア後、残りのAPはノーマル戦闘15の高速戦闘に使います。",
   "ko": "도전 전투는 전혀 하지 않습니다. 일반 전투를 클리어한 뒤 남은 AP는 일반 전투 15 빠른 전투에 씁니다."
  },
- "挑战战斗只推到这一关；到了之后剩下的AP用快速战斗刷这一关。": {
-  "en": "Challenge Battle is only pushed up to this stage; after that, the AP left goes to Quick Battle on this stage.",
-  "ja": "チャレンジ戦闘はこのステージまで進めます。到達後、残りのAPはこのステージの高速戦闘に使います。",
-  "ko": "도전 전투는 이 스테이지까지만 진행합니다. 도달한 뒤 남은 AP는 이 스테이지 빠른 전투에 씁니다."
+ "挑战战斗只推到这一关（快速战斗只有第5、10、15关）；到了之后剩下的AP用快速战斗刷这一关。": {
+  "en": "Challenge Battle is only pushed up to this stage (Quick Battle exists only on stages 5, 10 and 15); after that, the AP left goes to Quick Battle on this stage.",
+  "ja": "チャレンジ戦闘はこのステージまで進めます（高速戦闘はステージ5・10・15のみ）。到達後、残りのAPはこのステージの高速戦闘に使います。",
+  "ko": "도전 전투는 이 스테이지까지만 진행합니다(빠른 전투는 5, 10, 15 스테이지만). 도달한 뒤 남은 AP는 이 스테이지 빠른 전투에 씁니다."
  },
  "推不动时（都通关或到了设定的关卡），剩下的AP用快速战斗刷那一关；打输了就直接回主页。": {
   "en": "When it can't push further (all cleared or the set stage reached), the AP left goes to Quick Battle on that stage; after a lost battle it goes straight back to the home screen.",
