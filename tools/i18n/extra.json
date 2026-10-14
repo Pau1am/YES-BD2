@@ -1243,5 +1243,290 @@
   "en": "Check for updates",
   "ja": "アップデートを確認",
   "ko": "업데이트 확인"
+ },
+ "Windows 帐户的密码，不是 PIN": {
+  "en": "Your Windows account password, not the PIN",
+  "ja": "Windows アカウントのパスワード（PIN ではありません）",
+  "ko": "Windows 계정 비밀번호 (PIN 아님)"
+ },
+ "Windows 确认按「是」": {
+  "en": "Press \"Yes\" when Windows asks",
+  "ja": "Windows の確認で「はい」を押す",
+  "ko": "Windows 확인 창에서 「예」를 누르세요"
+ },
+ "「远程桌面服务」已经打开": {
+  "en": "\"Remote Desktop Services\" is on",
+  "ja": "「リモート デスクトップ サービス」をオンにしました",
+  "ko": "「원격 데스크톱 서비스」를 켰습니다"
+ },
+ "不见了，可能被防毒软件删掉": {
+  "en": "Missing, maybe deleted by antivirus",
+  "ja": "見つかりません。ウイルス対策ソフトに削除された可能性があります",
+  "ko": "없습니다. 백신 프로그램이 지웠을 수 있습니다"
+ },
+ "专业版，可以用": {
+  "en": "Pro edition, can use it",
+  "ja": "Pro エディション、使えます",
+  "ko": "Pro 버전, 사용 가능"
+ },
+ "关掉工具，重新打开再按一次": {
+  "en": "Close the tool, reopen it and press again",
+  "ja": "ツールを閉じて開き直し、もう一度押す",
+  "ko": "도구를 닫고 다시 열어 한 번 더 누르세요"
+ },
+ "再按一次首页的「在桌面分身跑」": {
+  "en": "Press \"Run on Clone Desktop\" on Home again",
+  "ja": "ホームの「分身デスクトップで実行」をもう一度押す",
+  "ko": "홈의 「분신 데스크톱에서 실행」을 다시 누르세요"
+ },
+ "分身程序": {
+  "en": "Clone program",
+  "ja": "分身プログラム",
+  "ko": "분신 프로그램"
+ },
+ "到 Windows「设置 > 帐户 > 登录选项」加一组密码": {
+  "en": "Add a password in Windows \"Settings > Accounts > Sign-in options\"",
+  "ja": "Windows の「設定 > アカウント > サインイン オプション」でパスワードを追加",
+  "ko": "Windows 「설정 > 계정 > 로그인 옵션」에서 비밀번호를 추가하세요"
+ },
+ "只允许 Windows Hello 登录": {
+  "en": "Only Windows Hello sign-in is allowed",
+  "ja": "Windows Hello サインインのみ許可されています",
+  "ko": "Windows Hello 로그인만 허용됨"
+ },
+ "可以用密码登录": {
+  "en": "Password sign-in allowed",
+  "ja": "パスワードでサインインできます",
+  "ko": "비밀번호로 로그인 가능"
+ },
+ "在左边「回报问题」送出": {
+  "en": "Send it from \"Report a problem\" on the left",
+  "ja": "左の「問題を報告」から送信",
+  "ko": "왼쪽 「문제 신고」에서 보내세요"
+ },
+ "在防毒软件（例如 360、火绒）把分身文件夹设为信任": {
+  "en": "Mark the clone folder as trusted in your antivirus (e.g. 360, Huorong)",
+  "ja": "ウイルス対策ソフト（360、火絨など）で分身フォルダーを信頼済みにする",
+  "ko": "백신 프로그램(예: 360, 화융)에서 분신 폴더를 신뢰로 설정하세요"
+ },
+ "家庭版不能用桌面分身，请用「一键完成日常」": {
+  "en": "Home edition can't use the Clone Desktop; use \"Run All Dailies\"",
+  "ja": "Home エディションでは分身デスクトップを使えません。「デイリー一括実行」を使ってください",
+  "ko": "Home 버전은 분신 데스크톱을 쓸 수 없습니다. 「일일 일괄 실행」을 쓰세요"
+ },
+ "密码打上面「要打的密码」那组，不是 PIN": {
+  "en": "Type the password shown under \"Password to type\" above, not the PIN",
+  "ja": "上の「入力するパスワード」を入力（PIN ではありません）",
+  "ko": "위 「입력할 비밀번호」를 입력하세요 (PIN 아님)"
+ },
+ "已经关掉": {
+  "en": "Turned off",
+  "ja": "オフにしました",
+  "ko": "껐습니다"
+ },
+ "已设定": {
+  "en": "Set up",
+  "ja": "設定済み",
+  "ko": "설정됨"
+ },
+ "帐户没有设密码": {
+  "en": "The account has no password",
+  "ja": "アカウントにパスワードがない",
+  "ko": "계정에 비밀번호가 없음"
+ },
+ "平常只用 PIN 或人脸开机：按 Win+L，选钥匙图示，用密码登录电脑一次": {
+  "en": "If you only sign in with PIN or face: press Win+L, pick the key icon and sign in once with the password",
+  "ja": "普段 PIN や顔認証だけでサインインしている場合：Win+L を押し、鍵アイコンを選んでパスワードで一度サインイン",
+  "ko": "평소 PIN이나 얼굴로만 로그인한다면: Win+L을 누르고 열쇠 아이콘을 골라 비밀번호로 한 번 로그인하세요"
+ },
+ "微软帐号的密码（登录微软网站用的那组），不是 PIN": {
+  "en": "Your Microsoft account password (the one for Microsoft websites), not the PIN",
+  "ja": "Microsoft アカウントのパスワード（Microsoft のサイトで使うもの）、PIN ではありません",
+  "ko": "Microsoft 계정 비밀번호 (Microsoft 웹사이트에 쓰는 것), PIN 아님"
+ },
+ "微软帐户 {name}": {
+  "en": "Microsoft account {name}",
+  "ja": "Microsoft アカウント {name}",
+  "ko": "Microsoft 계정 {name}"
+ },
+ "或把分身文件夹里的 viewer.log 传给我们": {
+  "en": "Or send us viewer.log from the clone folder",
+  "ja": "または分身フォルダーの viewer.log を送ってください",
+  "ko": "또는 분신 폴더의 viewer.log를 보내 주세요"
+ },
+ "打上面写的密码，勾「记住」": {
+  "en": "Type the password shown above and tick \"Remember\"",
+  "ja": "上に書いたパスワードを入力し、「記憶する」にチェック",
+  "ko": "위에 적힌 비밀번호를 입력하고 「기억」을 체크하세요"
+ },
+ "打开分身文件夹": {
+  "en": "Open clone folder",
+  "ja": "分身フォルダーを開く",
+  "ko": "분신 폴더 열기"
+ },
+ "按上面的「第一次设定」重新建立": {
+  "en": "Press \"First-time setup\" above to set it up again",
+  "ja": "上の「初回設定」を押して作り直す",
+  "ko": "위 「처음 설정」을 눌러 다시 만드세요"
+ },
+ "提示「分身程序不见了」": {
+  "en": "Says the clone program is missing",
+  "ja": "「分身プログラムが見つからない」と出る",
+  "ko": "「분신 프로그램이 없음」이라고 나옴"
+ },
+ "提示「登录失败」": {
+  "en": "Says sign-in failed",
+  "ja": "「サインインに失敗」と出る",
+  "ko": "「로그인 실패」라고 나옴"
+ },
+ "提示「连不上桌面分身」（代码 516 等）": {
+  "en": "Says it can't connect (code 516 etc.)",
+  "ja": "「接続できない」と出る（コード 516 など）",
+  "ko": "「연결할 수 없음」이라고 나옴 (코드 516 등)"
+ },
+ "本地帐户 {name}": {
+  "en": "Local account {name}",
+  "ja": "ローカル アカウント {name}",
+  "ko": "로컬 계정 {name}"
+ },
+ "桌面分身要 Windows 专业版，家庭版没有": {
+  "en": "The clone desktop needs Windows Pro; Home doesn't have it",
+  "ja": "分身デスクトップには Windows Pro が必要です（Home にはありません）",
+  "ko": "분신 데스크톱은 Windows Pro가 필요합니다 (Home에는 없음)"
+ },
+ "正常": {
+  "en": "OK",
+  "ja": "正常",
+  "ko": "정상"
+ },
+ "没有关掉（Windows 的确认按了「否」或改不了）": {
+  "en": "Not turned off (\"No\" was pressed, or it can't be changed)",
+  "ja": "オフになりませんでした（「いいえ」を押したか、変更できません）",
+  "ko": "끄지 못했습니다 (「아니요」를 눌렀거나 바꿀 수 없음)"
+ },
+ "没有密码的帐户进不了分身（Windows 的规定）": {
+  "en": "An account without a password can't sign in to the clone (a Windows rule)",
+  "ja": "パスワードのないアカウントは分身にサインインできません（Windows の仕様）",
+  "ko": "비밀번호가 없는 계정은 분신에 로그인할 수 없습니다 (Windows 규칙)"
+ },
+ "没有打开（Windows 的确认按了「否」或改不了）": {
+  "en": "Not turned on (\"No\" was pressed, or it can't be changed)",
+  "ja": "オンになりませんでした（「いいえ」を押したか、変更できません）",
+  "ko": "켜지 못했습니다 (「아니요」를 눌렀거나 바꿀 수 없음)"
+ },
+ "没有输入密码，桌面分身没有打开": {
+  "en": "No password typed, so the Clone Desktop didn't open",
+  "ja": "パスワードが入力されなかったため、分身デスクトップは開きませんでした",
+  "ko": "비밀번호를 입력하지 않아 분신 데스크톱이 열리지 않았습니다"
+ },
+ "没能登录桌面分身，请看左边「桌面分身」页的「登录失败」": {
+  "en": "Couldn't sign in to the Clone Desktop. See \"Sign-in failed\" on the \"Clone Desktop\" page on the left",
+  "ja": "分身デスクトップにサインインできませんでした。左の「分身デスクトップ」ページの「サインインに失敗」を見てください",
+  "ko": "분신 데스크톱에 로그인하지 못했습니다. 왼쪽 「분신 데스크톱」 페이지의 「로그인 실패」를 보세요"
+ },
+ "用过系统优化／精简工具或 RDP Wrapper 的电脑，可能不能用": {
+  "en": "PCs that used system optimiser/trimming tools or RDP Wrapper may not work",
+  "ja": "システム最適化・軽量化ツールや RDP Wrapper を使った PC では使えないことがあります",
+  "ko": "시스템 최적화/경량화 도구나 RDP Wrapper를 쓴 PC는 안 될 수 있습니다"
+ },
+ "登录帐户": {
+  "en": "Sign-in account",
+  "ja": "サインイン アカウント",
+  "ko": "로그인 계정"
+ },
+ "第一次怎么用": {
+  "en": "First time",
+  "ja": "はじめて使うとき",
+  "ko": "처음 사용할 때"
+ },
+ "被停用了": {
+  "en": "Disabled",
+  "ja": "無効になっています",
+  "ko": "사용 안 함으로 되어 있음"
+ },
+ "要 Windows 专业版；怎么设定看左边「桌面分身」页": {
+  "en": "Needs Windows Pro; see the \"Clone Desktop\" page on the left for setup",
+  "ja": "Windows Pro が必要。設定は左の「分身デスクトップ」ページへ",
+  "ko": "Windows Pro 필요. 설정은 왼쪽 「분신 데스크톱」 페이지를 보세요"
+ },
+ "要打的密码": {
+  "en": "Password to type",
+  "ja": "入力するパスワード",
+  "ko": "입력할 비밀번호"
+ },
+ "认不出是哪种帐户": {
+  "en": "Can't tell the account type",
+  "ja": "アカウントの種類を判別できません",
+  "ko": "계정 종류를 알 수 없음"
+ },
+ "设定好后，回来这页看一次": {
+  "en": "After setup, come back to this page",
+  "ja": "設定が終わったら、このページを見直してください",
+  "ko": "설정 후 이 페이지를 다시 보세요"
+ },
+ "请用「一键完成日常」": {
+  "en": "Use \"Run All Dailies\"",
+  "ja": "「デイリー一括実行」を使ってください",
+  "ko": "「일일 일괄 실행」을 쓰세요"
+ },
+ "边跑边用电脑；进不去就照这页做": {
+  "en": "Use your PC while it runs; can't get in? Follow this page",
+  "ja": "実行中も PC を使えます。入れないときはこのページの通りに",
+  "ko": "실행 중에도 PC를 쓸 수 있습니다. 들어가지 못하면 이 페이지대로 하세요"
+ },
+ "还是不行": {
+  "en": "Still not working",
+  "ja": "それでもだめなとき",
+  "ko": "그래도 안 될 때"
+ },
+ "还没设定": {
+  "en": "Not set up yet",
+  "ja": "まだ設定していません",
+  "ko": "아직 설정 안 함"
+ },
+ "这台电脑没有（精简版 Windows），不能用": {
+  "en": "This PC doesn't have it (trimmed Windows), can't use",
+  "ja": "この PC にはありません（軽量版 Windows）。使えません",
+  "ko": "이 PC에는 없습니다 (경량 Windows). 사용 불가"
+ },
+ "这台电脑的开机密码，不是 PIN": {
+  "en": "This PC's sign-in password, not the PIN",
+  "ja": "この PC のサインイン パスワード（PIN ではありません）",
+  "ko": "이 PC의 로그인 비밀번호 (PIN 아님)"
+ },
+ "这台电脑（自动检查）": {
+  "en": "This PC (checked automatically)",
+  "ja": "この PC（自動チェック）",
+  "ko": "이 PC (자동 확인)"
+ },
+ "远程桌面服务": {
+  "en": "Remote Desktop Services",
+  "ja": "リモート デスクトップ サービス",
+  "ko": "원격 데스크톱 서비스"
+ },
+ "遇到问题（点开看做法）": {
+  "en": "Problems (click for steps)",
+  "ja": "困ったとき（クリックで手順）",
+  "ko": "문제가 생기면 (눌러서 방법 보기)"
+ },
+ "重新开机后再试（刚设定完常要重新开机）": {
+  "en": "Restart the PC and try again (often needed right after setup)",
+  "ja": "PC を再起動してもう一度（設定直後はよく必要です）",
+  "ko": "PC를 다시 시작하고 다시 해 보세요 (설정 직후 자주 필요)"
+ },
+ "首页按「在桌面分身跑」": {
+  "en": "Press \"Run on Clone Desktop\" on Home",
+  "ja": "ホームで「分身デスクトップで実行」を押す",
+  "ko": "홈에서 「분신 데스크톱에서 실행」을 누르세요"
+ },
+ "首页没有「在桌面分身跑」": {
+  "en": "No \"Run on Clone Desktop\" on Home",
+  "ja": "ホームに「分身デスクトップで実行」がない",
+  "ko": "홈에 「분신 데스크톱에서 실행」이 없음"
+ },
+ "进不去？看教学": {
+  "en": "Can't get in? See guide",
+  "ja": "入れないときはガイドへ",
+  "ko": "못 들어가나요? 안내 보기"
  }
 }

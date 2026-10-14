@@ -94,5 +94,35 @@ class RunConfirmTest(unittest.TestCase):
         self.assertLess(buttons[MODE_TICKED].x(), buttons[MODE_LEFT].x())
 
 
+class CloneGuideButtonTest(unittest.TestCase):
+    """Leo 2026-10-14 「這裡要可以引導到教學」: 在桌面分身跑 links to its page."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _dialog(self, clone, open_guide):
+        dialog = RunConfirm([_child("a")], {"a": False}, {}, clone, None, open_guide)
+        self.addCleanup(dialog.close)
+        return dialog
+
+    def _guide_buttons(self, dialog):
+        from src.ui.shell.widgets import Button
+
+        return [b for b in dialog.findChildren(Button) if b.text() == "进不去？看教学"]
+
+    def test_the_clone_window_opens_the_guide_and_closes(self):
+        opened = []
+        dialog = self._dialog(True, lambda: opened.append(True))
+        buttons = self._guide_buttons(dialog)
+        self.assertEqual(1, len(buttons))
+        buttons[0].click()
+        self.assertEqual([True], opened)
+        self.assertEqual(dialog.result(), dialog.DialogCode.Rejected)
+
+    def test_the_normal_window_has_no_guide_button(self):
+        self.assertEqual([], self._guide_buttons(self._dialog(False, lambda: None)))
+
+
 if __name__ == "__main__":
     unittest.main()

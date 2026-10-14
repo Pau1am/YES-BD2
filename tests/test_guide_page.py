@@ -42,7 +42,8 @@ class GuidePageTest(unittest.TestCase):
 
     def test_sidebar_lists_the_guide_above_settings(self):
         keys = [key for key, _label, _icon in Sidebar.BOTTOM]
-        self.assertEqual(["problem", "guide", "settings", "about"], keys)
+        # Leo 2026-10-14: 桌面分身 has its own guide page under 使用说明.
+        self.assertEqual(["problem", "guide", "clone", "settings", "about"], keys)
 
     def test_every_picture_exists_and_loads(self):
         for name in PICTURES:

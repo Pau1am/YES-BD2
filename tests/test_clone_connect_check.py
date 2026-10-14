@@ -109,8 +109,15 @@ class LaunchFailureTest(unittest.TestCase):
         self.assertIn("不是密码的问题", text)
         self.assertIn("viewer.log", text)
         self.assertIn(str(clone_desktop.DATA_DIR), text)
-        other = clone_flow.launch_failure_text("failed 沒有登入分身")
-        self.assertIn("沒有登入分身", other)
+        other = clone_flow.launch_failure_text("failed 遠端桌面服務不能用")
+        self.assertIn("遠端桌面服務不能用", other)
+
+    def test_sign_in_failure_points_to_the_clone_page(self):
+        # It used to say the tool did not open in the clone (Leo 2026-10-14).
+        text = clone_flow.launch_failure_text("failed 沒有登入分身")
+        self.assertIn("「桌面分身」页", text)
+        self.assertIn("登录失败", text)
+        self.assertNotIn("没能自动打开工具", text)
 
     def test_viewer_uses_the_same_codes(self):
         source = (REPO / "tools" / "clone_desktop" / "CloneDesktop.cs").read_text(encoding="utf-8")

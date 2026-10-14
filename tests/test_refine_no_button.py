@@ -30,6 +30,14 @@ def _task(detail, popup_closes=True):
     return task
 
 
+def _with_pill(test):
+    # An open popup whose text read as nothing still shows its light pill
+    # (YES-BD2 #26: without it the read may be the bare grid).
+    from src.tasks import GearTasks
+
+    test.enterContext(mock.patch.object(GearTasks, "refine_pill_point", lambda _f: (1362, 734)))
+
+
 # An item not yet fully enhanced (Leo's frame 145607-refine-popup-r-new.png).
 POPUP = [
     SimpleNamespace(name="穿戴", x=1190, y=720, width=60, height=30),
@@ -53,6 +61,7 @@ class NoRefineButtonTest(unittest.TestCase):
         from src.tasks.GearTasks import REFINE_BUTTON_USUAL_POINT
 
         self.enterContext(mock.patch.object(GearTasks, "REFINE_RESULT_SECONDS", 0.0))
+        _with_pill(self)
         for detail in ([], [SimpleNamespace(name="兴", x=1340, y=720, width=20, height=30)]):
             with self.subTest(detail=detail):
                 task = _task(detail)
@@ -63,6 +72,7 @@ class NoRefineButtonTest(unittest.TestCase):
                 self.assertTrue(any("照精炼平常的位置点一下" in line for line in task.logs))
 
     def test_the_usual_spot_that_opens_the_refine_page_goes_on_with_its_checks(self):
+        _with_pill(self)
         task = _task([])
         task.refine_page = True
         task._refine_on_page = lambda: "refined"
