@@ -321,15 +321,19 @@ class FreeGachaTaskHelperTest(unittest.TestCase):
         self.assertEqual(BACK_PAGE_KEYWORDS, ocr_calls[0][0])
         self.assertEqual(1, ocr_calls[0][1])
 
-    def _slow_result_run(self, screen):
-        """``screen(now)`` -> OCR text; the ticket popup is found by keywords."""
+    def _slow_result_run(self, screen, moving=False):
+        """``screen(now)`` -> OCR text; the ticket popup is found by keywords.
+        ``moving``: the animation changes the picture on every look."""
         task = object.__new__(FreeGachaTask)
         task.config = {"结果页关键词最低命中数": 3}
         task.log_info = lambda *_a, **_k: None
         now = {"value": 0.0}
         clicks = []
         task._click_reference = lambda x, y, after_sleep=0: clicks.append(now["value"])
-        task.capture_frame = lambda: None
+        looks = iter(range(10**6))
+        task.capture_frame = lambda: np.full(
+            (80, 80, 3), 60 * (next(looks) % 2) if moving else 0, np.uint8
+        )
         task.info_set = lambda *_a: None
         task._ocr_text = lambda _frame, name: screen(now["value"])
         task.sleep = lambda seconds: now.__setitem__("value", now["value"] + seconds)
@@ -339,7 +343,9 @@ class FreeGachaTaskHelperTest(unittest.TestCase):
 
     def test_slow_result_animation_keeps_pressing_skip_until_the_ticket_popup(self):
         ticket = "抽抽乐券 可免费抽1次的抽抽乐券 查看获取途径"
-        found, clicks, ended = self._slow_result_run(lambda t: ticket if t >= 15 else "")
+        found, clicks, ended = self._slow_result_run(
+            lambda t: ticket if t >= 15 else "", moving=True
+        )
         self.assertTrue(found)
         self.assertLess(ended, 15.5)
         # Burst, then 5 s of watching only, then skip again between checks.
@@ -351,7 +357,9 @@ class FreeGachaTaskHelperTest(unittest.TestCase):
         page = "服装抽抽乐 查看概率 抽抽乐记录 购买"
         found, clicks, ended = self._slow_result_run(lambda t: page if t >= 6 else "")
         self.assertFalse(found)
-        self.assertGreaterEqual(ended, 30.0)
+        # A page that does not move ends 10 s after the burst, not at 30 s
+        # (Leo 2026-10-14 「頂多等8秒到10秒」).
+        self.assertTrue(13.9 <= ended <= 14.5, ended)
         self.assertFalse([t for t in clicks if t >= 4.0])
 
     def test_load_config_raises_saved_old_skip_burst_default(self):

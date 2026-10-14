@@ -3829,7 +3829,7 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
             BUY_CONFIRM_DIALOG_REGION,
         )
         self.assertEqual((1045 / 1920, 697 / 1080), BUY_CONFIRM_POINT)
-        self.assertEqual(30.0, BUY_CONFIRM_TIMEOUT)
+        self.assertEqual(10.0, BUY_CONFIRM_TIMEOUT)  # Leo 2026-10-14: was 30 s
         self.assertEqual([], warnings)
         self.assertEqual(
             [
@@ -4708,7 +4708,7 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
                 self.assertTrue(result.success)
                 self.assertEqual(
                     [
-                        ("close", {"timeout": 45.0}),
+                        ("close", {"timeout": 10.0}),  # a saved 45 s is capped (Leo 2026-10-14)
                         ("click", *CHAPTER_HOME_POINT, 0.0),
                         (
                             "home",
@@ -4788,7 +4788,7 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(
             [
-                ({ScreenState.HOME, ScreenState.SANDBOX}, 45.0),
+                ({ScreenState.HOME, ScreenState.SANDBOX}, 10.0),  # saved 45 s capped
                 (*CHAPTER_HOME_POINT, 0.0),
                 (
                     "wait_home",

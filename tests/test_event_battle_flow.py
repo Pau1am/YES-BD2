@@ -131,7 +131,7 @@ class EventEntryTest(unittest.TestCase):
     def test_unexecuted_quick_battle_warns_instead_of_claiming_done(self):
         task = make_task()
         task._run_mode = lambda mode: "cleared"
-        task._run_quick_battle = lambda: "skipped"
+        task._run_quick_battle = lambda mode, stage: "skipped"
         finished = []
         task._finish = lambda message: finished.append(message) or True
         self.assertTrue(task.run_claim())
@@ -402,10 +402,10 @@ class FailReasonTest(unittest.TestCase):
             "quick": True,
         }
         self.assertFalse(task.run_claim())
-        line = "活动每日战斗：快速战斗失败：挑战战斗关卡页上方的活动AP没读到。"
+        line = "活动每日战斗：挑战战斗15快速战斗失败：挑战战斗关卡页上方的活动AP没读到。"
         self.assertEqual(line, task.info["状态"])
         self.assertEqual(
-            "快速战斗失败：挑战战斗关卡页上方的活动AP没读到", self._summary_stage(task)
+            "挑战战斗15快速战斗失败：挑战战斗关卡页上方的活动AP没读到", self._summary_stage(task)
         )
         task.log_warning.assert_called_once_with(line)
 

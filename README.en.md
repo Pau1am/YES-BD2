@@ -41,7 +41,7 @@
 - **Weekly Farming**: uses Absorb, Assemble and Overpower on the Story Packs for you, spread over the days of the week.
 - **Daily Trade Run**: buys, cooks and sells by the sale calendar; you choose how much to keep.
 - **Run All Weeklies**: Arcade menu, House popularity, Craft Gear, Last Night.
-- **Clone Desktop**: the game runs on a separate, invisible desktop, so your mouse and keyboard stay yours.
+- **Clone Desktop**: the game runs on a separate desktop in its own window, so your mouse and keyboard stay yours.
 - **Fiend Hunter**: record your own fight once with F8; after that the tool sets each turn's order, positions and skills the same way, then fights.
 - **Today's Report**: what ran today, what failed and why, at a glance.
 
@@ -96,6 +96,38 @@
 | One item keeps failing | Open Today's Report for the reason and screenshot, then tell us in [Issues](https://github.com/nobell001/YES-BD2/issues) |
 
 A screenshot of Today's Report helps most. It may show your in-game account details, so check before posting.
+
+<details>
+<summary><b>Setting up the clone desktop</b></summary>
+
+The clone desktop runs the game in a separate desktop window, so you can keep using your PC and your mouse and keyboard are never taken.
+
+**You need**
+
+- Windows 10/11 Pro, Enterprise or Education. Home doesn't work.
+- Windows' "Remote Desktop Services" present and not disabled. The clone is this PC connecting to itself over Remote Desktop, and system optimizer/cleanup tools or trimmed Windows builds often touch it. The tool checks first; if it is disabled, press "Turn it on for me" (other PCs still can't connect).
+- Your Windows account password (for a Microsoft account, your Microsoft password). A PIN won't work.
+
+**First time**
+
+1. On Home press "Run on Clone Desktop" → "First-time setup", and click "Yes" when Windows asks.
+2. On a PC with a Microsoft account limited to Windows Hello sign-in, the tool asks you to press "Turn it off for me".
+3. Press "Run on Clone Desktop" again → "Go", and click "Yes" when Windows asks.
+4. In the sign-in box type your Windows account password (not the PIN) and tick "Remember my credentials" so you don't have to type it again.
+5. When the clone window opens, the game and dailies start by themselves; follow progress in the tool. It keeps running when minimized; closing it with X ends the clone and closes the game and tool inside.
+
+To undo: Settings → "Undo Clone Desktop setup" → "Undo".
+
+**Common problems**
+
+| Problem | What to do |
+|---|---|
+| Sign-in fails, password rejected | Type the account password, not the PIN; for a Microsoft account use the Microsoft password; if only Windows Hello is allowed, press "Turn it off for me" first |
+| "516" or "Remote access to the server is not enabled / the remote computer is turned off" | The clone couldn't be reached; it's not a password problem. Try in order: reopen the tool and press again → restart the PC and try again (often needed right after setup) → PCs that used optimizer/cleanup tools or RDP Wrapper may not support it. If it still fails, open an [issue](https://github.com/nobell001/YES-BD2/issues) with `%LOCALAPPDATA%\bd2-auto\clone-desktop\viewer.log` |
+| The clone program is gone | An antivirus may have deleted it: add `%LOCALAPPDATA%\bd2-auto\clone-desktop` to its trusted list, then press "First-time setup" again |
+| The PC won't shut down | Close the clone window with X first, or in Task Manager → Users, sign out the same-named user with fewer processes |
+
+</details>
 
 ## Which file to download
 

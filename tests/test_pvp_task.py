@@ -36,6 +36,7 @@ from src.tasks.PVPTask import (
     PVP_AUTO_BATTLE_MENU_VERIFY_SECONDS,
     PVP_AUTO_BATTLE_SCREEN_ROI,
     PVP_BACK_HOME_REFERENCE_POINT,
+    PVP_BATTLE_STUCK_SECONDS,
     PVP_BATTLE_START_SCREEN_POINT,
     PVP_CARTRIDGE_SLOT_POINT,
     PVP_CLICK_VERIFY_ATTEMPTS,
@@ -1766,7 +1767,9 @@ class PVPTaskHelperTest(unittest.TestCase):
             screen_clicks,
         )
         self.assertEqual(4, calls["min_matches"])
-        self.assertEqual(5 * 60, calls["timeout"])
+        # The base (here 5 min) is only the cap; no result and no battle for
+        # 10 s ends it (Leo 2026-10-14).
+        self.assertEqual(PVP_BATTLE_STUCK_SECONDS, calls["timeout"])
         self.assertEqual("PVP 结算", calls["name"])
         self.assertEqual(
             PVPTask._screen_reference_roi_to_reference_roi(PVP_RESULT_SCREEN_ROI),
@@ -1815,7 +1818,9 @@ class PVPTaskHelperTest(unittest.TestCase):
         task._return_home_from_pvp_hub = lambda: True
 
         self.assertTrue(PVPTask._wait_result_and_leave(task, 40))
-        self.assertEqual(90, calls["timeout"])  # was 30 s
+        # Leo 2026-10-14 「頂多等8秒到10秒」: no result and no battle for
+        # 10 s ends the wait; a running battle holds it up to the cap.
+        self.assertEqual(PVP_BATTLE_STUCK_SECONDS, calls["timeout"])
         self.assertEqual(180, calls["cap"])
         self.assertEqual(
             4,
@@ -1825,7 +1830,7 @@ class PVPTaskHelperTest(unittest.TestCase):
         )
 
     def _result_wait_on_a_clock(self, screen):
-        """Run the result wait (90 s, cap 180 s); screen(t) -> (result, battle) texts."""
+        """Run the result wait (10 s, cap 180 s); screen(t) -> (result, battle) texts."""
         task = object.__new__(PVPTask)
         task.info_set = lambda *_args, **_kwargs: None
         clock = [0.0]
@@ -1839,7 +1844,7 @@ class PVPTaskHelperTest(unittest.TestCase):
                 task,
                 PVPTask._pvp_result_patterns(task, 1),
                 min_matches=4,
-                timeout=90,
+                timeout=PVP_BATTLE_STUCK_SECONDS,
                 name="PVP 结算",
                 extra_wait_patterns=[(r"正在进行", None, "PVP 战斗中 OCR")],
                 max_timeout=180,
@@ -1853,12 +1858,35 @@ class PVPTaskHelperTest(unittest.TestCase):
         )
         self.assertTrue(found)
 
-    def test_result_wait_ends_15_seconds_after_the_battle_is_gone(self):
+    def test_result_wait_ends_10_seconds_after_the_battle_is_gone(self):
         found, now = self._result_wait_on_a_clock(
             lambda t: ("", "正在进行") if t < 100 else ("", "")
         )
         self.assertFalse(found)
-        self.assertTrue(114 <= now <= 116, now)
+        self.assertTrue(109 <= now <= 111, now)
+
+    def test_a_battle_that_keeps_the_screen_moving_is_waited_for(self):
+        # 正在进行 not read (effects over it), yet the battle moves on screen.
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        clock = [0.0]
+        task.capture_frame = lambda: np.full(
+            (80, 80, 3), 0 if clock[0] >= 60 else 90 * (int(clock[0] * 2) % 2), np.uint8
+        )
+        task._ocr_text = lambda frame, name, roi=None, **_kwargs: ""
+        task.sleep = lambda seconds: clock.__setitem__(0, clock[0] + seconds)
+        with patch("src.tasks.PVPTask.monotonic", lambda: clock[0]):
+            found, _text = PVPTask._wait_for_ocr_pattern_majority(
+                task,
+                PVPTask._pvp_result_patterns(task, 1),
+                min_matches=4,
+                timeout=PVP_BATTLE_STUCK_SECONDS,
+                name="PVP 结算",
+                extra_wait_patterns=[(r"正在进行", None, "PVP 战斗中 OCR")],
+                max_timeout=180,
+            )
+        self.assertFalse(found)
+        self.assertTrue(69 <= clock[0] <= 71, clock[0])  # 10 s after it stopped moving
 
     def test_result_wait_stops_at_the_cap_even_while_fighting(self):
         found, now = self._result_wait_on_a_clock(lambda t: ("", "正在进行"))
@@ -2175,7 +2203,9 @@ class PVPTaskHelperTest(unittest.TestCase):
         )
         # No idle wait for a loading screen: the home poll covers it.
         self.assertEqual([], loading_calls)
-        self.assertEqual([10.0], home_calls)
+        # Leo 2026-10-14 「頂多等8秒到10秒」: 10 s in all (was 20 s), half
+        # before the second press.
+        self.assertEqual([5.0], home_calls)
 
     def test_return_home_from_pvp_hub_retries_once_when_hub_remains(self):
         task = object.__new__(PVPTask)
@@ -2204,8 +2234,8 @@ class PVPTaskHelperTest(unittest.TestCase):
             clicks,
         )
         self.assertEqual([], loading_calls)
-        self.assertEqual(10.0, home_calls[0])
-        self.assertAlmostEqual(10.0, home_calls[1], places=5)
+        self.assertEqual(5.0, home_calls[0])
+        self.assertAlmostEqual(5.0, home_calls[1], places=5)
 
     def test_return_home_without_hub_signal_uses_remaining_time_without_second_click(self):
         task = object.__new__(PVPTask)
@@ -2228,8 +2258,8 @@ class PVPTaskHelperTest(unittest.TestCase):
 
         self.assertTrue(PVPTask._return_home_from_pvp_hub(task))
         self.assertEqual([(*PVP_BACK_HOME_REFERENCE_POINT, 1.0)], clicks)
-        self.assertEqual(10.0, home_calls[0])
-        self.assertAlmostEqual(10.0, home_calls[1], places=5)
+        self.assertEqual(5.0, home_calls[0])
+        self.assertAlmostEqual(5.0, home_calls[1], places=5)
 
     def test_return_home_reference_uses_validated_sandbox_home_point(self):
         self.assertEqual((1797, 63), PVP_BACK_HOME_REFERENCE_POINT)

@@ -47,6 +47,7 @@ from src.tasks.map_trade.navigator_constants import (
 )
 from src.tasks.map_trade.vision import Vision
 from src.utils.press_confirm import press_and_confirm
+from src.utils.wait_limits import STUCK_SECONDS
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1693,11 +1694,17 @@ class FieldWaitTest(unittest.TestCase):
     """Leo 2026-09-30: a stall ends after 15 s, not 45; walking is no stall."""
 
     @staticmethod
-    def _navigator(states, *, moving):
+    def _navigator(states, *, moving, still=False):
         clock = [0.0]
         states = iter(states)
         task = SimpleNamespace(sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds))
-        vision = SimpleNamespace(capture=lambda: np.zeros((10, 10, 3), np.uint8))
+        # A walk pans the field: every look differs (``still`` keeps it fixed).
+        looks = iter(range(10**6))
+        vision = SimpleNamespace(
+            capture=lambda: np.full(
+                (80, 80, 3), 0 if still else 60 * (next(looks) % 2), np.uint8
+            )
+        )
         navigator = Navigator(task, vision)
         navigator.classify = lambda _frame: next(states)
         navigator._auto_moving = lambda _frame: moving
@@ -1716,6 +1723,16 @@ class FieldWaitTest(unittest.TestCase):
         navigator, clock = self._navigator(states, moving=True)
 
         self.assertTrue(self._wait(navigator, clock).success)
+
+    def test_a_walk_whose_screen_stands_still_is_a_stall(self):
+        # Leo 2026-10-14 「頂多等8秒到10秒」: the 自动移动中 banner up but the
+        # field not moving no longer holds the wait.
+        navigator, clock = self._navigator(
+            [ScreenState.UNKNOWN] * 1000, moving=True, still=True
+        )
+
+        self.assertFalse(self._wait(navigator, clock).success)
+        self.assertLessEqual(clock[0], 15.5 + STUCK_SECONDS)
 
     def test_a_stall_ends_at_the_limit(self):
         navigator, clock = self._navigator([ScreenState.UNKNOWN] * 200, moving=False)

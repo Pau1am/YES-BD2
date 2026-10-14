@@ -171,7 +171,7 @@ class CountFromTheDialogTest(unittest.TestCase):
         reads = iter(reads)
         task._stable_stage_state = lambda mode: next(reads)
         task._auto_battle = lambda mode, wanted, read: fought
-        task._wait_for_stage_page = lambda mode: True
+        task._wait_for_stage_page = lambda mode, timeout=25.0: True
         return task
 
     def test_a_misread_ap_does_not_add_battles(self):
