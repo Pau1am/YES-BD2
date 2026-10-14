@@ -3,7 +3,7 @@
     # The version our patched launcher reports. Installed launchers replace
     # themselves only with a higher one (ok's update_pyappify), so bump this
     # whenever the launcher patches below change.
-    [string]$LauncherVersion = "1.2.7",
+    [string]$LauncherVersion = "1.2.8",
     [string]$BuildDir = "pyappify_build",
     [ValidateSet("zlib", "lzma")]
     [string]$NsisCompression = "lzma",
@@ -305,6 +305,7 @@ $appServicePath = Join-Path $buildPath "src-tauri\src\app_service.rs"
 $libRsPath = Join-Path $buildPath "src-tauri\src\lib.rs"
 $gitRsPath = Join-Path $buildPath "src-tauri\src\git.rs"
 $loggerRsPath = Join-Path $buildPath "src-tauri\src\utils\logger.rs"
+$pythonEnvRsPath = Join-Path $buildPath "src-tauri\src\python_env.rs"
 $i18nPath = Join-Path $buildPath "src\i18n.ts"
 
 # Every patch below must hit exactly once, or the build fails loudly (the old
@@ -322,6 +323,7 @@ $appService = (Get-Content -LiteralPath $appServicePath -Raw -Encoding UTF8) -re
 $libRs = (Get-Content -LiteralPath $libRsPath -Raw -Encoding UTF8) -replace "`r`n", "`n"
 $gitRs = (Get-Content -LiteralPath $gitRsPath -Raw -Encoding UTF8) -replace "`r`n", "`n"
 $loggerRs = (Get-Content -LiteralPath $loggerRsPath -Raw -Encoding UTF8) -replace "`r`n", "`n"
+$pythonEnvRs = (Get-Content -LiteralPath $pythonEnvRsPath -Raw -Encoding UTF8) -replace "`r`n", "`n"
 $appTsx = (Get-Content -LiteralPath $appTsxPath -Raw -Encoding UTF8) -replace "`r`n", "`n"
 $i18n = (Get-Content -LiteralPath $i18nPath -Raw -Encoding UTF8) -replace "`r`n", "`n"
 
@@ -368,6 +370,113 @@ $gitRs = Replace-Once $gitRs `
         }
 '@ -replace "`r`n", "`n") `
     "use local tags when the tag fetch fails"
+
+# The install sat at 「Receiving objects: 99.9%」 (player report 2026-10-13).
+# The progress line only moved in 0.1 steps and 100.0 - 99.9 is just under
+# 0.1 in floating point, so 100% never showed, and the steps after the
+# download (unpacking, writing the files) printed nothing. A download that
+# stopped getting data also waited forever: libgit2 has no read timeout.
+# Now 100% shows, unpacking and writing files show their own progress, and a
+# stalled download gives up after a minute with the 「连不上 GitHub」 message.
+$gitRs = Replace-Once $gitRs `
+    (@'
+        .clone();
+    let _guard = lock_arc.lock().await;
+
+    let profile = app.get_current_profile_settings();
+'@ -replace "`r`n", "`n") `
+    (@'
+        .clone();
+    let _guard = lock_arc.lock().await;
+
+    // A download that stops getting data gives up after a minute instead of
+    // waiting forever (libgit2 has no read timeout by default).
+    // SAFETY: only sets libgit2's global timeout values.
+    if let Err(e) = unsafe { git2::opts::set_server_timeout_in_milliseconds(60_000) } {
+        warn!("Could not set the git read timeout: {}", e);
+    }
+    let profile = app.get_current_profile_settings();
+'@ -replace "`r`n", "`n") `
+    "give up on a stalled download"
+$gitRs = Replace-Once $gitRs `
+    (@'
+        let app_name_for_progress_clone = app_name_for_messages.clone();
+        callbacks.transfer_progress({
+            let mut last_percent = -1.0;
+            move |progress: Progress| {
+'@ -replace "`r`n", "`n") `
+    (@'
+        let app_name_for_progress_clone = app_name_for_messages.clone();
+        callbacks.transfer_progress({
+            let mut last_percent = -1.0;
+            let mut last_deltas_percent = usize::MAX;
+            move |progress: Progress| {
+'@ -replace "`r`n", "`n") `
+    "track unpacking progress"
+$gitRs = Replace-Once $gitRs `
+    (@'
+                if total_objects > 0 {
+                    let current_percent = (received_objects as f64 * 100.0) / total_objects as f64;
+                    let rounded_percent = (current_percent * 10.0).round() / 10.0;
+                    if (rounded_percent - last_percent).abs() >= 0.1 {
+                        emit_update_info!(
+'@ -replace "`r`n", "`n") `
+    (@'
+                if total_objects > 0 {
+                    let current_percent = (received_objects as f64 * 100.0) / total_objects as f64;
+                    let rounded_percent = (current_percent * 10.0).round() / 10.0;
+                    let all_received = received_objects == total_objects;
+                    if all_received && progress.total_deltas() > 0 {
+                        let deltas_percent =
+                            progress.indexed_deltas() * 100 / progress.total_deltas();
+                        if deltas_percent != last_deltas_percent {
+                            emit_update_info!(
+                                app_name_for_progress_clone,
+                                "\rDownloaded {}. Unpacking files: {}%... ",
+                                format_bytes(received_bytes),
+                                deltas_percent
+                            );
+                            last_deltas_percent = deltas_percent;
+                        }
+                    } else if (rounded_percent - last_percent).abs() >= 0.1
+                        || (all_received && last_percent < 100.0)
+                    {
+                        emit_update_info!(
+'@ -replace "`r`n", "`n") `
+    "show 100% and the unpacking step"
+$gitRs = Replace-Once $gitRs `
+    (@'
+        let mut builder = git2::build::RepoBuilder::new();
+        builder.fetch_options(fetch_options);
+        builder.bare(false);
+
+'@ -replace "`r`n", "`n") `
+    (@'
+        let mut builder = git2::build::RepoBuilder::new();
+        builder.fetch_options(fetch_options);
+        builder.bare(false);
+        let app_name_for_checkout = app_name_for_messages.clone();
+        let mut last_checkout_percent = usize::MAX;
+        let mut checkout = CheckoutBuilder::new();
+        checkout.progress(move |_path, done, total| {
+            if total > 0 {
+                let percent = done * 100 / total;
+                if percent != last_checkout_percent {
+                    emit_update_info!(
+                        app_name_for_checkout,
+                        "\rWriting files: {}% ({} / {})... ",
+                        percent,
+                        done,
+                        total
+                    );
+                    last_checkout_percent = percent;
+                }
+            }
+        });
+        builder.with_checkout(checkout);
+
+'@ -replace "`r`n", "`n") `
+    "show the files being written"
 $appService = Replace-Once $appService `
     ("        ensure_repository(&app).await?;`n        let previous_known_version = app.current_version.clone();") `
     ("        if let Err(e) = ensure_repository(&app).await {`n" +
@@ -584,7 +693,122 @@ foreach ($entry in @(
         ("auto start text " + $entry[0])
 }
 
+# Try the package install again when a download breaks off (player report
+# 2026-10-14: PySide6 from the Aliyun mirror stopped at 34.6/72.4 MB with a
+# urllib3 read error, and older pip does not resume a broken download). Up
+# to 3 tries; pip's cache keeps every package already downloaded, and the
+# last try uses the other China mirror when Aliyun or Tsinghua is set. If
+# all fail, the message says what the player can do.
+$pythonEnvRs = Replace-Once $pythonEnvRs `
+    (@'
+#[cfg(target_os = "windows")]
+pub async fn install_requirements(
+    app_name: &str,
+    requirements: &str,
+    project_dir: &Path,
+    pip_args: &str,
+) -> Result<(), Error> {
+    let python_exe = get_python_exe(app_name, false);
+'@ -replace "`r`n", "`n") `
+    (@'
+#[cfg(target_os = "windows")]
+const PIP_INSTALL_ATTEMPTS: usize = 3;
+
+/// The other China mirror for the last try when the configured one keeps
+/// breaking off downloads; None keeps the configured source.
+#[cfg(target_os = "windows")]
+fn fallback_pip_index_url() -> Option<String> {
+    let configured = GLOBAL_CONFIG_STATE
+        .get()?
+        .lock()
+        .ok()?
+        .get_effective_pip_index_url()?;
+    if configured.contains("aliyun") {
+        Some("https://pypi.tuna.tsinghua.edu.cn/simple".to_string())
+    } else if configured.contains("tsinghua") {
+        Some("https://mirrors.aliyun.com/pypi/simple/".to_string())
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub async fn install_requirements(
+    app_name: &str,
+    requirements: &str,
+    project_dir: &Path,
+    pip_args: &str,
+) -> Result<(), Error> {
+    let mut last_error = String::new();
+    for attempt in 1..=PIP_INSTALL_ATTEMPTS {
+        let index_override = if attempt == PIP_INSTALL_ATTEMPTS {
+            fallback_pip_index_url()
+        } else {
+            None
+        };
+        if attempt > 1 {
+            emit_info!(
+                app_name,
+                "Package download broke off; trying again ({}/{}){}. Packages already downloaded are kept.",
+                attempt,
+                PIP_INSTALL_ATTEMPTS,
+                index_override
+                    .as_deref()
+                    .map(|url| format!(" from {}", url))
+                    .unwrap_or_default()
+            );
+        }
+        match install_requirements_once(
+            app_name,
+            requirements,
+            project_dir,
+            pip_args,
+            index_override.as_deref(),
+        )
+        .await
+        {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                warn!(
+                    "pip install for '{}' failed (attempt {}/{}): {}",
+                    app_name, attempt, PIP_INSTALL_ATTEMPTS, e
+                );
+                last_error = e.to_string();
+            }
+        }
+    }
+    Err(err!(
+        "安装所需套件失败（试了 {} 次，多半是下载中途断线）：请检查网络，或在启动器「设置」把 pip 来源换成别的，再按一次安装，已下载的套件会保留。Installing packages failed {} times, most likely the download broke off: check the network or pick another pip source in Settings, then press install again. ({})",
+        PIP_INSTALL_ATTEMPTS,
+        PIP_INSTALL_ATTEMPTS,
+        last_error
+    ))
+}
+
+#[cfg(target_os = "windows")]
+async fn install_requirements_once(
+    app_name: &str,
+    requirements: &str,
+    project_dir: &Path,
+    pip_args: &str,
+    index_override: Option<&str>,
+) -> Result<(), Error> {
+    let python_exe = get_python_exe(app_name, false);
+'@ -replace "`r`n", "`n") `
+    "retry the package install"
+$pythonEnvRs = Replace-Once $pythonEnvRs `
+    (@'
+        let index_url = config.get_effective_pip_index_url();
+'@ -replace "`r`n", "`n") `
+    (@'
+        let index_url = index_override
+            .map(str::to_string)
+            .or_else(|| config.get_effective_pip_index_url());
+'@ -replace "`r`n", "`n") `
+    "use the other mirror on the last try"
+
 Set-Content -LiteralPath $appServicePath -Value $appService -Encoding UTF8
+Set-Content -LiteralPath $pythonEnvRsPath -Value $pythonEnvRs -Encoding UTF8
 Set-Content -LiteralPath $libRsPath -Value $libRs -Encoding UTF8
 Set-Content -LiteralPath $gitRsPath -Value $gitRs -Encoding UTF8
 Set-Content -LiteralPath $loggerRsPath -Value $loggerRs -Encoding UTF8
