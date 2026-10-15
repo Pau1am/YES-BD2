@@ -466,10 +466,18 @@ class DailyTaskHelperTest(unittest.TestCase):
         )
         clicks = []
         task._click_reference = lambda x, y, **_kwargs: clicks.append((x, y))
-        # The first press is lost; the guild page shows after the second.
+        holds = []
+
+        def held_press(x, y, **kwargs):
+            holds.append(kwargs["down_time"])
+            clicks.append((round(x * REFERENCE_WIDTH), round(y * REFERENCE_HEIGHT)))
+
+        task.operate_click = held_press
+        # Two presses are lost (Leo 10-15 1080p); the guild page shows after
+        # the third.
         task._wait_guild_page = lambda _timeout: (
             ("page", "公告事项 进入公会联合战")
-            if clicks.count((370, 155)) >= 2
+            if clicks.count((370, 155)) >= 3
             else (None, "")
         )
         task._home_still_showing = lambda *_args: (370, 155) in clicks
@@ -477,7 +485,9 @@ class DailyTaskHelperTest(unittest.TestCase):
 
         with patch("src.tasks.DailyTask.GUILD_ENTRY_RETRY_SECONDS", 0.0):
             self.assertTrue(DailyTask.run_guild_sign_in(task))
-        self.assertEqual([(370, 155), (370, 155), (100, 50)], clicks)
+        self.assertEqual([(370, 155)] * 3 + [(100, 50)], clicks)
+        # The re-presses are held longer than a normal click.
+        self.assertEqual([0.15, 0.15], holds)
 
     def test_guild_entry_is_not_pressed_again_once_home_is_gone(self):
         # Loading (home gone, guild page not yet up): wait, never re-press.

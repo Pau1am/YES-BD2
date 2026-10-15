@@ -174,7 +174,7 @@
   "收藏重建周期": "Rebuild Favorite",
   "改了马上生效": "Takes effect right away",
   "料理清单": "Recipe list",
-  "开启后，5★ 角色的 SR 专用装备也会分解；关闭时保留（默认）。": "When on, SR Exclusive Gear of 5★ Characters is dismantled too; when off it is kept (default).",
+  "开启后，SR 不点开，和 R 一样直接分解；关闭时点开核对，5★ 角色的保留（默认）。": "When on, SR is dismantled without opening it, like R; when off it is opened and checked, and 5★ Characters' is kept (default).",
   "日": "Sun",
   "日常设定": "Daily Setup",
   "日志资料夹": "Logs folder",

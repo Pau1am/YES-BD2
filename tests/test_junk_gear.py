@@ -627,7 +627,8 @@ class GridShortcutTest(unittest.TestCase):
         from src.utils.junk_gear import GearItem
 
         task = self._task()
-        for setting in (False, True):
+        # On, SR never reaches it: dismantled off the grid (test below).
+        for setting in (False,):
             task.config = {FIVE_STAR_SR_KEY: setting}
             _grid_passes(task, rarity="SR")
             task._wait_detail = lambda *a, **k: True
@@ -645,6 +646,51 @@ class GridShortcutTest(unittest.TestCase):
             ):
                 task._classify_cells([(0, 0)], {}, _blank(), grade="SR")
             self.assertEqual([setting], seen)
+
+    def test_5_star_on_skips_opening_filtered_sr(self):
+        # Leo 2026-10-15 「sr就不用點開了 直接r sr全拆」.
+        from unittest import mock
+
+        from src.tasks.JunkGearTask import FIVE_STAR_SR_KEY
+
+        task = self._task()
+        task.config = {FIVE_STAR_SR_KEY: True}
+        _grid_passes(task, rarity="SR")
+        task._wait_detail = lambda *a, **k: self.fail("detail opened")
+        with mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=False):
+            self.assertEqual(
+                [(0, 0), (0, 1)],
+                task._classify_cells([(0, 0), (0, 1)], {}, _blank(), grade="SR"),
+            )
+        self.assertEqual([], task.clicks)
+
+    def test_5_star_on_skips_opening_sr_in_every_pass(self):
+        # Unfiltered and 「!」 passes too (Leo 2026-10-15 「你直接拆sr」).
+        from unittest import mock
+
+        from src.tasks.JunkGearTask import FIVE_STAR_SR_KEY
+
+        task = self._task()
+        task.config = {FIVE_STAR_SR_KEY: True}
+        _grid_passes(task, rarity="SR")
+        task._wait_detail = lambda *a, **k: self.fail("detail opened")
+        with mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=False):
+            self.assertEqual([(0, 0)], task._classify_cells([(0, 0)], {}, _blank(), grade=None))
+        self.assertEqual([], task.clicks)
+
+    def test_5_star_on_still_keeps_locked_and_enhanced_sr(self):
+        from unittest import mock
+
+        from src.tasks.JunkGearTask import FIVE_STAR_SR_KEY
+
+        task = self._task()
+        task.config = {FIVE_STAR_SR_KEY: True}
+        _grid_passes(task, rarity="SR")
+        task._older_cell_kept = lambda *_a: "已强化"
+        with mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=False):
+            self.assertEqual([], task._classify_cells([(0, 0)], {}, _blank(), grade="SR"))
+        with mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=True):
+            self.assertEqual([], task._classify_cells([(0, 0)], {}, _blank(), grade="SR"))
 
     def test_a_grid_r_is_junk_without_opening_it(self):
         # Leo 2026-10-11 「r不點開」.
