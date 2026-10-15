@@ -1,5 +1,6 @@
 """Map-trade trader tests (split from test_map_trade.py)."""
 
+import itertools
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
+from src.utils.wait_limits import LOADING_MAX_SECONDS, STUCK_SECONDS
 from src.tasks.map_trade.models import (
     CARD_BY_ID,
     MERCHANT_CARD_ID,
@@ -3018,6 +3020,7 @@ class TradeMerchantNavigationTest(unittest.TestCase):
             click_client=lambda point, shape, after_sleep=0: clicks.append(
                 (point, shape, after_sleep)
             ),
+            capture=lambda: None,
         )
         navigator = self._navigator(vision)
         navigator._locate_story_card = lambda card_id: located_ids.append(card_id) or located
@@ -3025,7 +3028,7 @@ class TradeMerchantNavigationTest(unittest.TestCase):
             rechecks.append((frame, badge)) or (confirmed_frame, confirmed_badge)
         )
 
-        def classify():
+        def classify(frame=None):
             state = next(pending_states)
             classified.append(state)
             return state
@@ -3045,34 +3048,74 @@ class TradeMerchantNavigationTest(unittest.TestCase):
         # A lone SANDBOX frame between loading frames does not count.
         self.assertEqual(states, classified)
 
-    def test_enter_trade_card_times_out_without_consecutive_sandbox_frames(self):
+    def _timed_trade_card_entry(self, states):
+        """_enter_trade_card on a clock that moves 1 s per look; ``states``
+        maps the time to what classify sees.  Returns (result, time)."""
         located = self._located_trade_card()
-        clicks = []
-        states = iter(
-            (
-                ScreenState.SANDBOX,
-                ScreenState.LOADING,
-                ScreenState.SANDBOX,
-                ScreenState.LOADING,
+        clock = [0.0]
+        still = np.full((720, 1280, 3), 120, np.uint8)
+        navigator = self._navigator(
+            SimpleNamespace(
+                click_client=lambda *_args, **_kwargs: None,
+                capture=lambda: still,
             )
         )
+        navigator.task.sleep = lambda seconds: clock.__setitem__(0, clock[0] + 1.0)
+        navigator._locate_story_card = lambda _card_id: located
+        navigator._confirm_story_badge_before_click = lambda frame, badge: (frame, badge)
+        navigator.classify = lambda frame=None: states(clock[0])
+        with patch(
+            "src.tasks.map_trade.navigator_trade.monotonic", side_effect=lambda: clock[0]
+        ):
+            result = navigator._enter_trade_card()
+        return result, clock[0]
+
+    def test_enter_trade_card_times_out_without_consecutive_sandbox_frames(self):
+        # A lone field frame between other screens never counts; a still
+        # screen that is not the field ends the wait after STUCK_SECONDS.
+        looks = itertools.cycle((ScreenState.SANDBOX, ScreenState.CARD_MENU))
+        result, now = self._timed_trade_card_entry(lambda _t: next(looks))
+        self.assertFalse(result.success)
+        self.assertEqual("剧情游戏卡1入场确认超时", result.message)
+        self.assertLessEqual(now, STUCK_SECONDS + 1.0)
+
+    def test_enter_trade_card_does_not_count_the_loading_screen(self):
+        # Leo 2026-10-15 「我說的10秒是卡死 或者辨識不到」: 2K, the field came
+        # 13 s after the click.
+        result, now = self._timed_trade_card_entry(
+            lambda t: ScreenState.LOADING if t < 13.0 else ScreenState.SANDBOX
+        )
+        self.assertTrue(result.success)
+        self.assertEqual(13.0, now)
+
+    def test_enter_trade_card_stops_at_the_loading_cap(self):
+        result, now = self._timed_trade_card_entry(lambda t: ScreenState.LOADING)
+        self.assertFalse(result.success)
+        self.assertTrue(LOADING_MAX_SECONDS <= now <= LOADING_MAX_SECONDS + 1.0, now)
+
+    def test_enter_trade_card_skips_the_full_classify_on_the_black_loading_screen(self):
+        # 2K 10-15: each classify on the loading screen took ~3 s, so the
+        # field, up 13 s after the click, was never read twice in time.
+        located = self._located_trade_card()
+        black = np.full((720, 1280, 3), 5, np.uint8)
+        field = np.full((720, 1280, 3), 120, np.uint8)
+        frames = iter([black, black, black, field, field])
+        classified = []
         navigator = self._navigator(
-            SimpleNamespace(click_client=lambda point, *_args, **_kwargs: clicks.append(point))
+            SimpleNamespace(
+                click_client=lambda *_args, **_kwargs: None,
+                capture=lambda: next(frames),
+            )
         )
         navigator._locate_story_card = lambda _card_id: located
         navigator._confirm_story_badge_before_click = lambda frame, badge: (frame, badge)
-        navigator.classify = lambda: next(states)
+        navigator.classify = lambda frame=None: classified.append(frame) or ScreenState.SANDBOX
 
-        with patch(
-            "src.tasks.map_trade.navigator_trade.monotonic",
-            side_effect=(0.0, 1.0, 2.0, 3.0, 100.0),
-        ):
-            result = navigator._enter_trade_card()
+        result = navigator._enter_trade_card()
 
-        self.assertFalse(result.success)
-        self.assertEqual(ScreenState.LOADING, result.state)
-        self.assertEqual("剧情游戏卡1入场确认超时", result.message)
-        self.assertEqual([located.badge.best.result.center], clicks)
+        self.assertTrue(result.success)
+        self.assertEqual(TRADE_CARD_SANDBOX_HITS, len(classified))
+        self.assertTrue(all(frame is field for frame in classified))
 
     def test_enter_trade_card_returns_locate_failure_without_clicking(self):
         failure = NavigationResult(False, ScreenState.HOME, "无法从主页打开快速切换卡带页面")
@@ -4708,7 +4751,7 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
                 self.assertTrue(result.success)
                 self.assertEqual(
                     [
-                        ("close", {"timeout": 10.0}),  # a saved 45 s is capped (Leo 2026-10-14)
+                        ("close", {"timeout": 45.0}),  # a saved 45 s stays: loading (Leo 2026-10-15)
                         ("click", *CHAPTER_HOME_POINT, 0.0),
                         (
                             "home",
@@ -4788,7 +4831,7 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(
             [
-                ({ScreenState.HOME, ScreenState.SANDBOX}, 10.0),  # saved 45 s capped
+                ({ScreenState.HOME, ScreenState.SANDBOX}, 45.0),  # loading: saved 45 s stays (Leo 2026-10-15)
                 (*CHAPTER_HOME_POINT, 0.0),
                 (
                     "wait_home",

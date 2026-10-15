@@ -239,3 +239,27 @@ class RecoveryRestsTheWatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProgressWaitTest(unittest.TestCase):
+    def test_loading_and_movement_do_not_count_a_still_screen_does(self):
+        from src.utils.wait_limits import STUCK_SECONDS, ProgressWait, is_loading_dark
+
+        black = np.full((80, 80, 3), 10, np.uint8)
+        still = np.full((80, 80, 3), 120, np.uint8)
+        self.assertTrue(is_loading_dark(black))
+        self.assertFalse(is_loading_dark(still))
+        self.assertFalse(is_loading_dark(np.zeros((80, 80, 3), np.uint8)))
+        wait = ProgressWait(0.0)
+        for t in range(0, 20):
+            self.assertFalse(wait.over(black, float(t), loading=True))
+        self.assertFalse(wait.over(still, 20.0))
+        self.assertFalse(wait.over(still, 20.0 + STUCK_SECONDS - 1))
+        self.assertTrue(wait.over(still, 20.0 + STUCK_SECONDS))
+
+    def test_the_cap_ends_even_a_loading_wait(self):
+        from src.utils.wait_limits import LOADING_MAX_SECONDS, ProgressWait
+
+        wait = ProgressWait(0.0)
+        black = np.full((80, 80, 3), 10, np.uint8)
+        self.assertTrue(wait.over(black, LOADING_MAX_SECONDS, loading=True))

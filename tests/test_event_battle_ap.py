@@ -52,8 +52,14 @@ def make_task():
 
 
 class ParseApTest(unittest.TestCase):
-    def test_a_pool_above_its_top_stays_as_read(self):
-        self.assertEqual((25, 0), parse_ap("8,400 25/5"))
+    def test_a_pool_above_its_top_counts_as_the_top(self):
+        # Still above 0, so the dialog opens; never more than the pool holds.
+        self.assertEqual((5, 0), parse_ap("8,400 25/5"))
+        self.assertEqual((5, 0), parse_ap("8,400 20/5"))
+
+    def test_an_absurd_bonus_is_ignored(self):
+        self.assertEqual((3, 0), parse_ap("3/5 +12345"))
+        self.assertEqual((3, 2), parse_ap("3/5 +2"))
 
     def test_a_dot_for_the_currency_comma(self):
         self.assertEqual((5, 0), parse_ap("5.650 5/5"))

@@ -3077,16 +3077,16 @@ class PVPTaskHelperTest(unittest.TestCase):
         task = object.__new__(PVPTask)
         task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
-        task.capture_frame = lambda: self.fail(
-            "expired deadline must not sample frames"
+        # A still frame that is not loading ends a 0 s wait on its first
+        # look, before any OCR (Leo 2026-10-15: a load wait, see load_wait).
+        task.capture_frame = lambda: np.full((1080, 1920, 3), 120, np.uint8)
+        task._pvp_special_page_ocr_boxes = lambda *_a, **_k: self.fail(
+            "expired wait must not read the frame"
         )
         diagnostics = []
         task._save_flow_diagnostic = diagnostics.append
 
-        with patch("src.tasks.PVPTask.monotonic", side_effect=(0.0, 1.0)):
-            self.assertFalse(
-                PVPTask._wait_for_pvp_hub_after_cart(task, timeout=0.0)
-            )
+        self.assertFalse(PVPTask._wait_for_pvp_hub_after_cart(task, timeout=0.0))
         self.assertEqual(["pvp_hub_entry_failed"], diagnostics)
 
     def test_start_auto_battle_fails_when_multiplier_not_confirmed(self):

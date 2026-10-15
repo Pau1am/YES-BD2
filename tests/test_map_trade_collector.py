@@ -3,6 +3,7 @@
 import tempfile
 import unittest
 from datetime import datetime
+from time import monotonic
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -886,7 +887,7 @@ class CollectorSkillTest(unittest.TestCase):
 
     def test_action_feedback_region_and_character_threshold_follow_calibration(self):
         self.assertEqual(
-            (735 / 1920, 210 / 1080, 1182 / 1920, 270 / 1080),
+            (735 / 1920, 165 / 1080, 1182 / 1920, 270 / 1080),
             ACTION_FEEDBACK_RELATIVE_ROI,
         )
         self.assertEqual(0.80, ACTION_FEEDBACK_CHARACTER_RATIO)
@@ -2756,7 +2757,7 @@ class GreyNeedsSearchTest(unittest.TestCase):
 class GreyAbsorbSkipsMapTest(unittest.TestCase):
     """Leo 2026-10-07: a grey 吸收 on a battle map skips 召集/压制 too."""
 
-    def _grey_absorb_run(self, summon_grey: bool):
+    def _grey_absorb_run(self, summon_grey: bool, card_id: str = "Q_sp12"):
         with tempfile.TemporaryDirectory() as temp_dir:
             progress = ProgressStore(
                 Path(temp_dir) / "progress.json",
@@ -2776,17 +2777,17 @@ class GreyAbsorbSkipsMapTest(unittest.TestCase):
                         ActionIconState.USED, MatchResult(0.98, (1, 1), (5, 5)), stable=True
                     )
                     return collector._resolve_preexisting_used(
-                        action, used, card_id="Q_sp12", map_role=CollectionMapRole.BATTLE_AREA_1
+                        action, used, card_id=card_id, map_role=CollectionMapRole.BATTLE_AREA_1
                     ), None
                 # A bright icon: stop here with a failure so nothing is clicked.
                 return SkillExecutionResult(False, message=f"{action.name}可按"), None
 
             collector._prepare_action = prepare
             results = collector._use_actions_pipelined(
-                BATTLE_ACTIONS, card_id="Q_sp12", map_role=CollectionMapRole.BATTLE_AREA_1
+                BATTLE_ACTIONS, card_id=card_id, map_role=CollectionMapRole.BATTLE_AREA_1
             )
             states = {
-                name: (progress.get_action_record("Q_sp12", CollectionMapRole.BATTLE_AREA_1, name) or {}).get("state")
+                name: (progress.get_action_record(card_id, CollectionMapRole.BATTLE_AREA_1, name) or {}).get("state")
                 for name in ("召集", "压制")
             }
             return prepared, results, states
@@ -2804,6 +2805,45 @@ class GreyAbsorbSkipsMapTest(unittest.TestCase):
         self.assertEqual(["吸收", "召集"], prepared)
         self.assertFalse(results[-1].completed)
         self.assertEqual("召集可按", results[-1].message)
+
+    def test_memory_edge_battle_area_still_presses_suppress(self):
+        # Leo 2026-10-15 「活動卡帶記憶邊緣 戰鬥區 就算沒資源能吸收 也要按壓制」.
+        prepared, results, _states = self._grey_absorb_run(summon_grey=True, card_id="Q_ep5")
+        self.assertEqual(["吸收", "召集", "压制"], prepared)
+        self.assertEqual("压制可按", results[-1].message)
+
+
+class DimWaitTest(unittest.TestCase):
+    """Leo 2026-10-15 「按技能前都要罰站很久」: a grey icon is waited out only
+    right after 探查 was pressed, and once per bar."""
+
+    def _collector(self, pressed_ago, waited=False):
+        collector = object.__new__(Collector)
+        collector._status = lambda *a: None
+        collector.sleeps = []
+        collector.task = SimpleNamespace(sleep=collector.sleeps.append)
+        collector._detect_action_icon = lambda *a, **k: (
+            None,
+            ActionIconDetection(ActionIconState.USED, MatchResult(0.98, (1, 1), (5, 5)), stable=True),
+        )
+        collector._search_pressed_at = None if pressed_ago is None else monotonic() - pressed_ago
+        collector._dim_waited_at = monotonic() if waited else None
+        return collector
+
+    def test_no_wait_when_search_was_already_running(self):
+        collector = self._collector(None)
+        collector._detect_fresh_action_icon(SUMMON_ACTION, None)
+        self.assertEqual([], collector.sleeps)
+
+    def test_waits_right_after_search_was_pressed(self):
+        collector = self._collector(1.0)
+        collector._detect_fresh_action_icon(SUMMON_ACTION, None)
+        self.assertTrue(collector.sleeps)
+
+    def test_the_second_icon_does_not_wait_again(self):
+        collector = self._collector(1.0, waited=True)
+        collector._detect_fresh_action_icon(SUPPRESS_ACTION, None)
+        self.assertEqual([], collector.sleeps)
 
 
 class SlotPressTest(unittest.TestCase):
@@ -2845,12 +2885,33 @@ class SlashlessCountTest(unittest.TestCase):
         self.assertEqual((11, 21), parse_used_limit("11121", 21))
         self.assertEqual((7, 70), parse_used_limit("7/70", 70))
 
+    def test_a_five_digit_read_is_refused_not_guessed(self):
+        """Live 4K 2026-10-14: 压制 11/75 was read as "11775"."""
+        from src.tasks.map_trade.vision import parse_used_limit
+
+        self.assertIsNone(parse_used_limit("11775", 75))
+        self.assertIsNone(parse_used_limit("80/75", 75))
+
     def test_without_a_known_limit_or_a_fit_nothing_is_guessed(self):
         from src.tasks.map_trade.vision import parse_used_limit
 
         self.assertIsNone(parse_used_limit("7170"))
         self.assertIsNone(parse_used_limit("9999", 70))
         self.assertIsNone(parse_used_limit("70", 70))
+
+    def test_a_limit_read_steadily_this_run_splits_a_slashless_read(self):
+        """2K 2026-10-15: 压制 read 0/75 … 6/75 steadily, but its default 80
+        stayed, so "7175" failed and Q_cp7 was skipped."""
+        from src.tasks.map_trade.collector_skills import SkillExecutionMixin
+        from src.tasks.map_trade.vision import parse_used_limit
+
+        skills = object.__new__(SkillExecutionMixin)
+        skills.progress = SimpleNamespace(limit_of=lambda _name: 80)
+        self.assertEqual(80, skills._known_limit("压制"))
+        self.assertIsNone(parse_used_limit("7175", skills._known_limit("压制")))
+        skills._remember_limit("压制", 75)
+        self.assertEqual(75, skills._known_limit("压制"))
+        self.assertEqual((7, 75), parse_used_limit("7175", skills._known_limit("压制")))
 
 
 class CollectionRouteTest(unittest.TestCase):

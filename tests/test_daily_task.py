@@ -496,7 +496,7 @@ class DailyTaskHelperTest(unittest.TestCase):
         task._click_reference = lambda x, y, **_kwargs: clicks.append((x, y))
         waits = []
         # The guild page shows only after the long wait (a slow load).
-        task._wait_guild_page = lambda timeout: (
+        task._wait_guild_page = lambda timeout, **_kwargs: (
             waits.append(timeout) or (("page", "公告事项 公会商店") if timeout else (None, ""))
         )
         task._home_still_showing = lambda *_args: False
@@ -1369,7 +1369,7 @@ class DailyTaskHelperTest(unittest.TestCase):
             click_ocr_calls.append((patterns, roi, timeout, name)) or True
         )
 
-        def wait_ocr(patterns, roi, timeout, name):
+        def wait_ocr(patterns, roi, timeout, name, **_kwargs):
             ocr_calls.append((patterns, roi, timeout, name))
             return "狩猎场", SimpleNamespace()
 
@@ -1821,7 +1821,7 @@ class DailyTaskHelperTest(unittest.TestCase):
         task._quick_hunt_click_ocr = lambda *_args, **_kwargs: False
         confirm_calls = []
 
-        def fake_wait_ocr(patterns, roi, timeout, name):
+        def fake_wait_ocr(patterns, roi, timeout, name, **_kwargs):
             confirm_calls.append((patterns, roi, timeout, name))
             return ("火之洞穴 水之洞穴 风之洞穴 光之洞穴 暗之洞穴", SimpleNamespace())
 

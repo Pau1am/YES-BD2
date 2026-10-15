@@ -76,7 +76,7 @@ def _menu_task(menu_after, home_after_press):
         task.presses.append(name)
         return True
 
-    def wait_ocr(_patterns, _roi, timeout, name):
+    def wait_ocr(_patterns, _roi, timeout, name, **_kwargs):
         task.waited[0] += timeout
         return ("狩猎场" if task.waited[0] >= menu_after else "", None)
 

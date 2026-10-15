@@ -500,7 +500,7 @@ class SquareGoddessEntryTest(unittest.TestCase):
         self.assertEqual(
             [
                 {
-                    "timeout": 10.0,  # Leo 2026-10-14: was 15 s
+                    "timeout": 15.0,  # Leo 2026-10-15: a load wait keeps its setting
                     "retry_home_clicks": 2,
                     "retry_interval": 2.0,
                     "total_home_clicks": 3,
@@ -897,3 +897,58 @@ class StuckGoddessWalkTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SquareArrivalWaitTest(unittest.TestCase):
+    """Leo 2026-10-15 「我說的10秒是卡死 或者辨識不到」: loading is not stuck."""
+
+    def _run(self, screen_at, prompt_at=None):
+        from src.utils.wait_limits import STUCK_SECONDS  # noqa: F401
+
+        task = object.__new__(SquareGoddessTask)
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
+        logs = []
+        task.log_info = lambda message, **_kwargs: logs.append(message)
+        clock = [0.0]
+        task.sleep = lambda seconds: clock.__setitem__(0, clock[0] + 1.0)
+        task.capture_frame = lambda: screen_at(clock[0])
+        task._match = lambda frame, spec: MatchResult(-1.0, (0, 0), (0, 0))
+        task._passes = lambda result, spec: False
+        task._ocr_pattern_click_point = lambda frame, patterns, name, roi=None: (
+            ((900, 500), "向女神像许愿")
+            if prompt_at is not None and clock[0] >= prompt_at
+            else (None, "")
+        )
+        with patch("src.tasks.SquareGoddessTask.monotonic", side_effect=lambda: clock[0]):
+            arrived = SquareGoddessTask._wait_for_template(
+                task, FANTASIA_SQUARE_TEMPLATE, timeout=10.0, name="梦幻广场", arrival=True
+            )
+        return arrived, clock[0], logs
+
+    BLACK = np.full((90, 160, 3), 8, np.uint8)
+    SQUARE = np.full((90, 160, 3), 140, np.uint8)
+    HOME = np.full((90, 160, 3), 200, np.uint8)
+
+    def test_wish_prompt_after_a_long_load_counts_as_arrived(self):
+        # 2K 10-15: square up 11 s after the click, its picture unmatched.
+        arrived, now, logs = self._run(
+            lambda t: self.BLACK if t < 11.0 else self.SQUARE, prompt_at=11.0
+        )
+        self.assertTrue(arrived)
+        self.assertEqual(11.0, now)
+        self.assertTrue(any("向女神像许愿" in line for line in logs))
+
+    def test_a_still_screen_that_is_not_the_square_ends_after_stuck_seconds(self):
+        from src.utils.wait_limits import STUCK_SECONDS
+
+        arrived, now, _logs = self._run(lambda t: self.HOME)
+        self.assertFalse(arrived)
+        self.assertTrue(STUCK_SECONDS <= now <= STUCK_SECONDS + 1.0, now)
+
+    def test_an_endless_loading_screen_stops_at_the_cap(self):
+        from src.utils.wait_limits import LOADING_MAX_SECONDS
+
+        arrived, now, _logs = self._run(lambda t: self.BLACK)
+        self.assertFalse(arrived)
+        self.assertTrue(LOADING_MAX_SECONDS <= now <= LOADING_MAX_SECONDS + 1.0, now)

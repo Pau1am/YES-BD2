@@ -608,7 +608,7 @@ class FreeGachaTaskHelperTest(unittest.TestCase):
         task.log_info = lambda message, **_kwargs: logs.append(message)
         calls = []
 
-        def fake_wait(keywords, timeout, minimum_matches, name, interval=0.5):
+        def fake_wait(keywords, timeout, minimum_matches, name, interval=0.5, **_kwargs):
             calls.append((tuple(keywords), minimum_matches))
             return (minimum_matches == 1 and keywords == ["装备抽抽乐"], "服装抽抽乐")
 
@@ -631,7 +631,7 @@ class FreeGachaTaskHelperTest(unittest.TestCase):
         task.log_info = lambda message, **_kwargs: logs.append(message)
         calls = []
 
-        def fake_wait(keywords, timeout, minimum_matches, name, interval=0.5):
+        def fake_wait(keywords, timeout, minimum_matches, name, interval=0.5, **_kwargs):
             calls.append((tuple(keywords), minimum_matches))
             return (minimum_matches == 1 and keywords == ["服装抽抽乐"], "装备抽抽乐")
 
