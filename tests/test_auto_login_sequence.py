@@ -42,6 +42,7 @@ class AutoLoginSequenceTest(unittest.TestCase):
             "登录按钮点击 X 百分比": 72.2396,
             "登录按钮点击 Y 百分比": 65.0926,
         }
+        task._game_closed = lambda: False  # the game is open in these tests
         task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
         task.sleep = lambda *_args, **_kwargs: None

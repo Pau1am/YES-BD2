@@ -87,6 +87,26 @@ class CollectionCardTest(unittest.TestCase):
                 self.assertGreaterEqual(reward_call.kwargs["timeout"], 0.0)
                 self.assertLessEqual(reward_call.kwargs["timeout"], 1.0)
 
+    def test_story_entry_reward_timeout_never_rounds_above_the_budget(self):
+        # A coarse clock (Windows) returns the same instant twice, and
+        # (t + 1.0) - t is 1.0000000000009095 at this t.
+        failure = NavigationResult(False, ScreenState.UNKNOWN, "入场确认超时")
+        task = SimpleNamespace(
+            _handle_recent_cartridge_special_pages=Mock(
+                return_value=CartridgeSpecialPageResult.ABSENT
+            )
+        )
+        navigator = Navigator(task, SimpleNamespace())
+        navigator._wait_for_field_hud = Mock(return_value=failure)
+        with patch(
+            "src.tasks.map_trade.navigator_sandbox.monotonic",
+            return_value=8191.285790162597,
+        ):
+            navigator._wait_for_story_sandbox(1, timeout=1.0)
+        reward_call = task._handle_recent_cartridge_special_pages.call_args
+        self.assertLessEqual(reward_call.kwargs["timeout"], 1.0)
+        self.assertLessEqual(navigator._wait_for_field_hud.call_args.kwargs["timeout"], 1.0)
+
     def test_collection_card_selection_uses_common_quick_switch_and_badge_center(self):
         clicks = []
         client_clicks = []
