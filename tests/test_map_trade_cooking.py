@@ -14,6 +14,7 @@ from src.tasks.map_trade.models import (
     DEFAULT_COOKING_RECIPES,
     DEFAULT_RECIPES,
     FINAL_COOKING_RECIPE,
+    MAP_TRADE_REFERENCE,
     MatchResult,
     NavigationResult,
     ScreenState,
@@ -22,13 +23,13 @@ from src.tasks.map_trade.navigator import Navigator
 from src.tasks.map_trade.navigator_constants import MERCHANT_PROMPT_OCR_ROI
 from src.tasks.map_trade.trader import Trader
 from src.tasks.map_trade.trader_cooking import (
+    COOKING_MAX_FIXED_POINT,
     COOKING_BACK_POINT,
     COOKING_BACK_TEMPLATE,
     COOKING_DETAIL_TEMPLATE,
     COOKING_EXIT_TIMEOUT,
     COOKING_ICON_QUICK_TIMEOUT,
     COOKING_LIST_GRID_ROI,
-    COOKING_MAX_QUANTITY_TEMPLATE,
     COOKING_QUANTITY_ATTEMPTS,
     COOKING_QUANTITY_CHOICES_ROI,
     COOKING_RECIPE_SPECS,
@@ -350,9 +351,6 @@ class CookingFlowTest(unittest.TestCase):
         trader._click_quantity_choice = lambda _recipe, choice: (
             events.append(f"quantity {choice}") or True
         )
-        trader._wait_for_max_detail = lambda _recipe, _timeout: (
-            events.append("MAX confirmed") or detail
-        )
         trader._wait_for_cooking_started = lambda _recipe, _timeout: (
             events.append("button turned gray") or True
         )
@@ -367,7 +365,7 @@ class CookingFlowTest(unittest.TestCase):
             CookingRecipeOutcome.COOKED,
             trader._cook_one_recipe(recipe),
         )
-        self.assertLess(events.index("quantity MAX"), events.index("MAX confirmed"))
+        self.assertLess(events.index("quantity MAX"), events.index("button turned gray"))
         self.assertLess(events.index("button turned gray"), events.index("result confirmed"))
         self.assertLess(events.index("result confirmed"), events.index("list restored"))
 
@@ -431,41 +429,43 @@ class CookingFlowTest(unittest.TestCase):
         )
         self.assertEqual([True], recovered)
 
-    def test_lost_max_click_retries_and_never_starts_without_confirmation(self):
+    def test_max_press_then_start_without_slider_check(self):
+        # Leo 2026-10-15: pressed MAX + pressed 制作 is enough; the slider is
+        # never compared.  MAX that cannot be read is pressed at its fixed spot.
         recipe = DEFAULT_COOKING_RECIPES[0]
         frame = np.full((1080, 1920, 3), 145, dtype=np.uint8)
         card = MatchResult(0.99, (1000, 600), (100, 100), pixel_score=0.99)
         start = MatchResult(0.99, (1100, 970), (400, 60), pixel_score=0.99)
         detail = CookingDetailSnapshot(frame, start, True, 0.7)
-        for ignored, already_max, expected_clicks, expected in (
-            (1, False, 2, CookingRecipeOutcome.COOKED),
-            (COOKING_QUANTITY_ATTEMPTS, False, COOKING_QUANTITY_ATTEMPTS,
-             CookingRecipeOutcome.FAILED),
-            (COOKING_QUANTITY_ATTEMPTS, True, 1, CookingRecipeOutcome.COOKED),
+        for missing, expected_clicks, expected in (
+            (0, 1, CookingRecipeOutcome.COOKED),
+            (1, 1, CookingRecipeOutcome.COOKED),
+            (COOKING_QUANTITY_ATTEMPTS, 0, CookingRecipeOutcome.COOKED),
         ):
-            with self.subTest(ignored=ignored, already_max=already_max):
-                state = {"max": already_max, "clicks": 0, "started": False}
+            with self.subTest(missing=missing):
+                state = {"reads": 0, "clicks": 0, "fixed": [], "started": False}
                 trader = object.__new__(Trader)
                 trader.task = CookingTask()
 
                 def click(point, _shape, after_sleep=0.0):
                     if point == (690, 875):
                         state["clicks"] += 1
-                        if state["clicks"] > ignored:
-                            state["max"] = True
                     elif point == start.center:
                         state["started"] = True
 
+                def boxes(*_args, **_kwargs):
+                    state["reads"] += 1
+                    if state["reads"] <= missing:
+                        return []
+                    return [SimpleNamespace(name="MAX", x=650, y=850, width=80, height=50)]
+
                 trader.vision = SimpleNamespace(
                     match=lambda *_args: card,
-                    passes=lambda _match, spec: (
-                        state["max"] if spec is COOKING_MAX_QUANTITY_TEMPLATE else True
-                    ),
+                    passes=lambda *_args: True,
                     click_client=click,
                     simplify=lambda value: value,
-                    ocr_boxes=lambda *_args, **_kwargs: [
-                        SimpleNamespace(name="MAX", x=650, y=850, width=80, height=50)
-                    ],
+                    ocr_boxes=boxes,
+                    click_reference=lambda x, y, after_sleep=0.0: state["fixed"].append((x, y)),
                 )
                 trader._wait_for_cooking_list = lambda _: CookingListSnapshot(frame, card)
                 trader._wait_for_cooking_detail = lambda *_args: detail
@@ -474,9 +474,11 @@ class CookingFlowTest(unittest.TestCase):
                 trader._wait_for_cooking_result = lambda *_args: frame
                 trader._return_from_detail_to_list = lambda *_args: True
                 trader._recover_cooking_list = lambda: True
-                with patch("src.tasks.map_trade.trader_cooking.COOKING_QUANTITY_VERIFY_SECONDS", 0):
-                    self.assertIs(expected, trader._cook_one_recipe(recipe))
+                self.assertIs(expected, trader._cook_one_recipe(recipe))
                 self.assertEqual(expected_clicks, state["clicks"])
+                self.assertEqual(
+                    [COOKING_MAX_FIXED_POINT] if expected_clicks == 0 else [], state["fixed"]
+                )
                 self.assertEqual(expected is CookingRecipeOutcome.COOKED, state["started"])
 
     def test_gray_card_skips_without_clicking_or_opening_detail(self):
@@ -511,11 +513,23 @@ class CookingFlowTest(unittest.TestCase):
                     expected, trader._wait_for_cooking_started(DEFAULT_RECIPES[0], 0.0)
                 )
 
+    def test_max_fixed_point_lands_on_max_text(self):
+        # click_reference scales from MAP_TRADE_REFERENCE (1280x720); the point
+        # must land inside the MAX text box of Leo's 2560x1440 frame
+        # (926-995 x 1165-1187).
+        x = COOKING_MAX_FIXED_POINT[0] / MAP_TRADE_REFERENCE.width * 2560
+        y = COOKING_MAX_FIXED_POINT[1] / MAP_TRADE_REFERENCE.height * 1440
+        self.assertTrue(926 <= x <= 995, x)
+        self.assertTrue(1165 <= y <= 1187, y)
+
     def test_cooking_implementation_has_no_scroll_or_resolution_pixel_clicks(self):
         source = inspect.getsource(CookingFlowMixin)
 
         self.assertNotIn("drag_reference", source)
-        self.assertNotIn("click_reference", source)
+        # The one fixed-position press: MAX when its text cannot be read
+        # (Leo 2026-10-15 「你總是要有補救方案」).
+        self.assertEqual(1, source.count("click_reference"))
+        self.assertIn("click_reference(*COOKING_MAX_FIXED_POINT", source)
         self.assertNotIn("1203", source)
         self.assertEqual(
             (
@@ -531,24 +545,6 @@ class CookingFlowTest(unittest.TestCase):
 
 
 class CookingRecognitionTest(unittest.TestCase):
-    def test_max_quantity_gate_on_recorded_min_and_max_slider_at_client_sizes(self):
-        from src.tasks.map_trade.vision import Vision
-
-        fixtures = Path(__file__).parent / "fixtures/map_trade/cooking_quantity"
-        for name, expected in (("min", False), ("max", True)):
-            frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
-            frame[970:1035, 300:730] = cv2.imread(str(fixtures / f"{name}.png"))
-            for size in ((1920, 1080), (1280, 720), (1191, 669)):
-                with self.subTest(state=name, size=size):
-                    current = cv2.resize(frame, size)
-                    trader = object.__new__(Trader)
-                    trader.task = CookingTask()
-                    trader.vision = Vision(trader.task)
-                    detail = CookingDetailSnapshot(current, MatchResult(1, (0, 0), (1, 1)),
-                                                   True, 0.7)
-                    trader._cooking_detail_snapshot = lambda _: detail
-                    self.assertEqual(expected, trader._wait_for_max_detail("recipe", 0) is detail)
-
     def test_card_background_distinguishes_gray_bright_and_uncertain(self):
         for size in (64, 96):
             match = MatchResult(0.97, (0, 0), (size, size))

@@ -5,7 +5,8 @@ and again on the same frames made brighter (gamma 0.8) and HDR-washed
 (linear x1.5, clipped).  These three gates had the thinnest margins and fell
 under on the brighter frames: the 跑图 quick-switch (P) button (0.002-0.013
 above 0.85 on bright scenes, 9 of 45 lost), the 交互直传 map header (all 4
-lost under HDR) and the cooking MAX slider (0.018 above 0.95, all lost).
+lost under HDR) and the cooking MAX slider (0.018 above 0.95, all lost;
+that check was removed 2026-10-15).
 With ``brightness_tolerant`` they pass again, and what they must reject
 still is.
 """
@@ -21,7 +22,6 @@ from src.tasks.map_trade.navigator_constants import (
     QUICK_SWITCH_TEMPLATE,
     TELEPORT_MAP_DIRECT_HEADER_TEMPLATE,
 )
-from src.tasks.map_trade.trader_cooking import COOKING_MAX_QUANTITY_TEMPLATE
 from src.tasks.map_trade.vision import TEMPLATE_DIR
 from src.utils import task_vision
 from tests.test_quick_switch_bright_field import OTHER_PAGES, SIZES, frame_4k, scenes, sized
@@ -90,26 +90,6 @@ class TeleportHeaderTest(unittest.TestCase):
                     with self.subTest(page=page, height=height, variant=name):
                         self.assertEqual(
                             expected, _passes(_variant(frame, table), TELEPORT_MAP_DIRECT_HEADER_TEMPLATE)
-                        )
-
-
-class CookingMaxTest(unittest.TestCase):
-    def test_max_slider_passes_and_min_does_not(self):
-        crops = FIXTURES / "map_trade" / "cooking_quantity"
-        for state, expected in (("min", False), ("max", True)):
-            frame = np.zeros((1080, 1920, 3), np.uint8)
-            frame[970:1035, 300:730] = cv2.imread(str(crops / f"{state}.png"))
-            for size in ((1920, 1080), (1280, 720), (1191, 669)):
-                current = cv2.resize(frame, size)
-                for name, table in VARIANTS.items():
-                    if expected and size == (1191, 669) and name == "hdr":
-                        # Still under: 0.940 after brightness matching against
-                        # 0.95 in a small window under strong HDR (the step
-                        # then reports 未确认数量滑块到达 MAX).
-                        continue
-                    with self.subTest(state=state, size=size, variant=name):
-                        self.assertEqual(
-                            expected, _passes(_variant(current, table), COOKING_MAX_QUANTITY_TEMPLATE)
                         )
 
 
