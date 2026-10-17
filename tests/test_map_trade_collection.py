@@ -170,7 +170,16 @@ class CollectionCardTest(unittest.TestCase):
         self.assertEqual("Q_sp1", result.message)
         self.assertEqual([1], badge_targets)
         self.assertEqual(
-            [("ensure_home", "click_quick_switch", "confirm_quick_switch_page")],
+            [
+                (
+                    "ensure_home",
+                    "click_quick_switch",
+                    "confirm_quick_switch_page",
+                    "quick_switch_page_shown",
+                    "repress_quick_switch",
+                    "home_shown",
+                )
+            ],
             opened_callbacks,
         )
         self.assertEqual([(QUICK_SWITCH_TEMPLATE, 3.0, 1.0)], template_clicks)

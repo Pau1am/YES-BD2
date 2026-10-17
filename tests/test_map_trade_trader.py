@@ -3171,13 +3171,27 @@ class TradeMerchantNavigationTest(unittest.TestCase):
     def test_walk_to_merchant_fails_without_ocr_when_guide_button_missing(self):
         navigator = self._guide_missing_navigator(in_field=False)
         navigator._confirm_travel = lambda: self.fail("no travel without the guide menu")
+        navigator._walk_via_area_map = lambda: self.events.append("area_map") or False
 
         self.assertFalse(navigator._walk_to_merchant())
         self.assertEqual(
-            [("template", MERCHANT_NAV_GUIDE_TEMPLATE, MERCHANT_NAV_GUIDE_TIMEOUT)],
+            [("template", MERCHANT_NAV_GUIDE_TEMPLATE, MERCHANT_NAV_GUIDE_TIMEOUT), "area_map"],
             self.events,
         )
         self.assertTrue(self.warnings)
+
+    def test_walk_to_merchant_uses_the_area_map_when_the_guide_button_is_missing(self):
+        # Leo's 2K 一键日常 10-17 (v0.1.42): 买 failed with the merchant
+        # prompt unread; the ≡ button had no second way.
+        navigator = self._guide_missing_navigator(in_field=False)
+        navigator._confirm_travel = lambda: self.fail("no travel without the guide menu")
+        navigator._walk_via_area_map = lambda: self.events.append("area_map") or True
+        waits = []
+        navigator._wait_for_merchant_prompt = lambda timeout: waits.append(timeout) or True
+
+        self.assertTrue(navigator._walk_to_merchant())
+        self.assertEqual(["area_map"], self.events[1:])
+        self.assertEqual([MERCHANT_ARRIVAL_TIMEOUT], waits)  # no second area-map walk
 
     def test_walk_to_merchant_presses_guide_place_when_field_is_confirmed(self):
         # 2K 桌面分身 2026-10-16: the guide template read -1.000 all run while
@@ -3585,7 +3599,7 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
             enter_q_sp6_buy_flow=lambda **_kw: NavigationResult(True, ScreenState.SHOP)
         )
         trader.rebuild_favorites = lambda: actions.append(("rebuild",)) or True
-        trader.buy_all_favorites = lambda: actions.append(("buy-all",)) or True
+        trader.buy_all_favorites = lambda **_k: actions.append(("buy-all",)) or True
         trader._wait_for_buy_all_favorites_state = lambda: (
             (1454, 1004), np.zeros((1080, 1920, 3), dtype=np.uint8)
         )
@@ -3670,7 +3684,7 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
                     enter_q_sp6_buy_flow=lambda **_kw: NavigationResult(True, ScreenState.SHOP)
                 )
                 trader.rebuild_favorites = lambda: self.fail("售罄后不应切卡重建收藏")
-                trader.buy_all_favorites = lambda: self.fail("售罄后不应继续购买")
+                trader.buy_all_favorites = lambda **_k: self.fail("售罄后不应继续购买")
                 trader.vision = SimpleNamespace(
                     capture=lambda: frame,
                     ocr_boxes=lambda *_args: [
@@ -3887,8 +3901,8 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
                 (point, shape, after_sleep)
             )
         )
-        trader._wait_for_buy_all_favorites_state = lambda: ((1454, 1004), frame)
-        trader._wait_for_purchase_confirmation = lambda: True
+        trader._wait_for_buy_all_favorites_state = lambda *_a: ((1454, 1004), frame)
+        trader._wait_for_purchase_confirmation = lambda *_a, **_k: True
         trader._wait_purchase_dialog_closed = lambda: True
 
         self.assertTrue(trader.buy_all_favorites())
@@ -4002,7 +4016,7 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
                     passes=lambda result, _spec: result.score == 1.0,
                     click_client=lambda *_args, **_kwargs: clicks.append("buy"),
                 )
-                trader._wait_for_purchase_confirmation = lambda: True
+                trader._wait_for_purchase_confirmation = lambda *_a, **_k: True
                 trader._wait_purchase_dialog_closed = lambda: True
 
                 self.assertTrue(trader.buy_all_favorites())
@@ -4056,13 +4070,15 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
                 (point, shape, after_sleep)
             )
         )
-        trader._wait_for_buy_all_favorites_state = lambda: ((969, 669), frame)
-        trader._wait_for_purchase_confirmation = lambda: False
+        trader._wait_for_buy_all_favorites_state = lambda *_a: ((969, 669), frame)
+        trader._wait_for_purchase_confirmation = lambda *_a, **_k: False
+        trader._purchase_dialog_partly_read = lambda: False
 
         self.assertFalse(trader.buy_all_favorites())
-        self.assertEqual([((969, 669), frame.shape, 0.3)], clicks)
+        # Pressed once more after the first press opened nothing, then stopped.
+        self.assertEqual([((969, 669), frame.shape, 0.3)] * 2, clicks)
         self.assertEqual(
-            ["买：点击一键购买全部收藏后，未同时识别到确认标题和询问文字。"],
+            ["买：点了一键购买全部收藏，确认弹窗一直没有出现或读不到，停止购买。"],
             warnings,
         )
 

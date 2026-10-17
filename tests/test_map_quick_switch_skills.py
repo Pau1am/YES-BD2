@@ -102,7 +102,7 @@ class HomeQuickSwitchKeyTest(unittest.TestCase):
             info_set=lambda *_a: None,
             operate_click=lambda *_a, **_k: None,
             _handle_recent_cartridge_special_pages=lambda **_k: CartridgeSpecialPageResult.ABSENT,
-            _quick_switch_by_key=lambda *_a: handed.append(True) or True,
+            _quick_switch_by_key=lambda *_a, **_k: handed.append(True) or True,
         )
 
         opened = BaseBD2Task.open_cartridge_quick_switcher(
@@ -114,6 +114,94 @@ class HomeQuickSwitchKeyTest(unittest.TestCase):
 
         self.assertTrue(opened)
         self.assertEqual([True], handed)
+
+    def _task(self, handed):
+        from src.tasks.BaseBD2Task import CartridgeSpecialPageResult
+
+        return SimpleNamespace(
+            _recent_cartridge_is_pvp=lambda: False,
+            _sleep_after_recognition=lambda: None,
+            info_set=lambda *_a: None,
+            log_info=lambda *_a, **_k: None,
+            operate_click=lambda *_a, **_k: None,
+            _handle_recent_cartridge_special_pages=lambda **_k: CartridgeSpecialPageResult.ABSENT,
+            _quick_switch_by_key=lambda *_a, **k: handed.append(k) or False,
+        )
+
+    def test_dropped_press_is_made_again_at_once(self):
+        # Player via Leo 2026-10-17 「切换卡带的时候可以点两下」: 广场 and
+        # 竞技场 drop the quick-switch press.
+        from src.tasks.BaseBD2Task import (
+            QUICK_SWITCH_REPRESS_AFTER_SECONDS,
+            BaseBD2Task,
+        )
+
+        presses, looks, handed = [], [], []
+        opened = BaseBD2Task.open_cartridge_quick_switcher(
+            self._task(handed),
+            ensure_home=lambda: True,
+            click_quick_switch=lambda: presses.append("first") or True,
+            confirm_quick_switch_page=lambda: presses == ["first", "again"],
+            quick_switch_page_shown=lambda seconds: looks.append(seconds) or False,
+            repress_quick_switch=lambda: presses.append("again") or True,
+            home_shown=lambda: False,
+        )
+
+        self.assertTrue(opened)
+        self.assertEqual(["first", "again"], presses)
+        self.assertEqual([QUICK_SWITCH_REPRESS_AFTER_SECONDS], looks)
+        self.assertEqual([], handed)
+
+    def test_no_second_press_once_the_page_shows(self):
+        from src.tasks.BaseBD2Task import BaseBD2Task
+
+        handed = []
+        opened = BaseBD2Task.open_cartridge_quick_switcher(
+            self._task(handed),
+            ensure_home=lambda: True,
+            click_quick_switch=lambda: True,
+            confirm_quick_switch_page=lambda: True,
+            quick_switch_page_shown=lambda _s: True,
+            repress_quick_switch=lambda: self.fail("the page opened: no second press"),
+        )
+
+        self.assertTrue(opened)
+
+    def test_keys_get_the_short_home_look(self):
+        from src.tasks.BaseBD2Task import BaseBD2Task
+
+        handed = []
+        home_look = lambda: False  # noqa: E731
+        BaseBD2Task.open_cartridge_quick_switcher(
+            self._task(handed),
+            ensure_home=lambda: True,
+            click_quick_switch=lambda: True,
+            confirm_quick_switch_page=lambda: False,
+            quick_switch_page_shown=lambda _s: False,
+            repress_quick_switch=lambda: False,
+            home_shown=home_look,
+        )
+
+        self.assertEqual([{"home_shown": home_look}], handed)
+
+    def test_key_fallback_uses_the_short_home_look(self):
+        from src.tasks.BaseBD2Task import BaseBD2Task
+
+        sent = []
+        task = SimpleNamespace(
+            log_info=lambda *_a, **_k: None,
+            tap_key=lambda key, after_sleep=0.0: sent.append(key) or True,
+            _save_flow_diagnostic=lambda _n: None,
+        )
+        opened = BaseBD2Task._quick_switch_by_key(
+            task,
+            lambda: self.fail("the long home wait is not used"),
+            lambda: True,
+            home_shown=lambda: False,
+        )
+
+        self.assertTrue(opened)
+        self.assertEqual(["P"], sent)
 
 
 def _skill_collector(script):

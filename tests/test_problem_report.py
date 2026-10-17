@@ -137,6 +137,63 @@ class RecordTest(unittest.TestCase):
             [line["text"] for line in record["problem"]["logs"]],
         )
 
+    def test_a_stuck_trade_phase_says_why_and_the_next_phase_runs(self):
+        from src.tasks.map_trade.models import NavigationResult, ScreenState
+        from src.tasks.MapTradeTask import MapAutomationTaskBase
+        from src.utils.frozen_screen import FrozenScreen, FrozenWatch
+
+        warnings = []
+
+        class TradeTask(Task):
+            task_log_name = "跑商"
+            diagnostic_prefix = "map_trade"
+            _run_phases = MapAutomationTaskBase._run_phases
+            _return_home_after_phases = MapAutomationTaskBase._return_home_after_phases
+            phase_needs = {}
+            _note_phase_problem = MapAutomationTaskBase._note_phase_problem
+
+            def __init__(self):
+                super().__init__()
+                self.config = {}
+
+            def info_set(self, key, value):
+                self.info[key] = value
+
+            def log_info(self, *_args, **_kwargs):
+                pass
+
+            def log_warning(self, message, *_a, **_k):
+                warnings.append(message)
+
+            log_error = _save_diagnostic = log_info
+
+        task = TradeTask()
+        fired = FrozenWatch()
+        fired.fired = True
+        task._frozen_watch = fired
+        ran = []
+
+        def buy():
+            task.info_set("当前阶段", "一键购买全部收藏")
+            raise FrozenScreen()
+
+        def sell():
+            ran.append("卖")
+            return True
+
+        with problem_report.run_scope(task) as scope:
+            scope.result = task._run_phases(
+                SimpleNamespace(return_home=lambda: NavigationResult(True, ScreenState.HOME)),
+                (("买", "买", buy), ("卖", "卖", sell)),
+            )
+        [record] = self.saved()
+        problem = record["problem"]
+        self.assertEqual("一键购买全部收藏", problem["stage"])
+        self.assertIn("秒没有变化", problem["note"])
+        self.assertEqual(["卖"], ran)
+        self.assertIsNot(fired, task._frozen_watch)  # started over
+        self.assertTrue(any("买：" in w and "秒没有变化" in w for w in warnings))
+
     def test_a_map_phase_failure_is_kept_before_going_home(self):
         from src.tasks.map_trade.models import NavigationResult, ScreenState
         from src.tasks.MapTradeTask import MapAutomationTaskBase

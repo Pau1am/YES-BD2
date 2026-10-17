@@ -46,6 +46,7 @@ class SkipBrokenCardTest(unittest.TestCase):
     ):
         events = []
         warnings = []
+        self.infos = []
         home = (
             NavigationResult(True, ScreenState.HOME)
             if home_ok
@@ -60,7 +61,7 @@ class SkipBrokenCardTest(unittest.TestCase):
             task = SimpleNamespace(
                 config={"卡带单步重试次数": 2},
                 log_warning=lambda message, *_a, **_k: warnings.append(message),
-                info_set=lambda *_args: None,
+                info_set=lambda *args: self.infos.append(args),
             )
             if recovered is not None:
                 # A real task: the general way home is tried after a skip.
@@ -132,6 +133,11 @@ class SkipBrokenCardTest(unittest.TestCase):
         self.assertTrue(result.message.startswith("活动卡5这次跳过，没有完成"))
         self.assertIn("「跑图章节」取消勾选", result.message)
         self.assertTrue(any("活动卡5进不去" in line for line in warnings))
+        # The summary says why (player report 2026-10-17 said only 「这次跳过」).
+        self.assertIn("（原因：活动卡5进不去", result.message)
+        # 「停在」 names the skip, not the next card's step.
+        stage = [value for key, value in self.infos if key == "当前阶段"][-1]
+        self.assertEqual("地图采集：活动卡5跳过，没有完成", stage)
 
     def test_every_missing_card_is_named_once(self):
         result, _events, _warnings, _state = self._run(
@@ -149,6 +155,7 @@ class SkipBrokenCardTest(unittest.TestCase):
 
         self.assertFalse(result.success)
         self.assertIn("第1章", result.message)
+        self.assertIn("走不过去", result.message)
         # The maps really done stay recorded; the card is not finished.
         self.assertEqual({"main_area", "battle_area_1"}, state.completed_targets("Q_sp1"))
         self.assertFalse(state.card_verified("Q_sp1"))

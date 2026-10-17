@@ -825,9 +825,19 @@ class DailyTaskHelperTest(unittest.TestCase):
         confirm_results = iter([True, False, False])
         task._wait_for_home_confirmation = lambda name, **_kwargs: next(confirm_results)
 
-        self.assertFalse(DailyTask.run_guild_sign_in(task))
+        # The guild page was seen, so the sign-in is done; home is left to
+        # the recovery flow (player 2026-10-17: a popup over home made the
+        # done sign-in count as failed).
+        recoveries = []
+        with patch(
+            "src.tasks.DailyTask.recover_to_home",
+            side_effect=lambda _task: recoveries.append(1) or True,
+        ):
+            self.assertTrue(DailyTask.run_guild_sign_in(task))
         self.assertEqual([(370, 155), (100, 50)], clicks)
         self.assertEqual(1, len(blanks))
+        self.assertEqual([1], recoveries)
+        self.assertFalse(task._home_lost_after_done)
 
     def test_guild_page_alone_counts_as_signed_in(self):
         # No 签到成功 toast (already signed in today): the page UI is enough.
@@ -2313,6 +2323,36 @@ class DailyTaskHelperTest(unittest.TestCase):
         self.assertEqual(["guild", "home", "business"], calls)
         self.assertEqual("['公会签到']", infos["跳过"])
         self.assertEqual("[]", infos["失败"])
+
+    def test_failed_step_reason_names_that_step(self):
+        # Player 2026-10-17 (v0.1.42): 公会签到 failed, but the summary said
+        # 「失败：一键收菜：关闭经营管理弹窗」, the run's last log line.
+        task, _calls, infos = self._run_task(False, home_back=True)
+
+        def guild():
+            return DailyTask._step_failed(task, "公会入口按了2次都没进入公会页面")
+
+        task.run_guild_sign_in = guild
+        self.assertFalse(DailyTask.run(task))
+        self.assertEqual("公会签到：公会入口按了2次都没进入公会页面", task._why)
+        self.assertEqual(
+            "公会、小屋、酒馆失败：公会签到：公会入口按了2次都没进入公会页面。", infos["状态"]
+        )
+
+    def test_done_step_that_cannot_reach_home_stops_the_rest(self):
+        task, calls, infos = self._run_task(True, home_back=True)
+
+        def guild():
+            calls.append("guild")
+            with patch("src.tasks.DailyTask.recover_to_home", return_value=False):
+                return DailyTask._home_after_done(task, "公会签到")
+
+        task.run_guild_sign_in = guild
+        self.assertFalse(DailyTask.run(task))
+        self.assertEqual(["guild"], calls)
+        self.assertEqual("公会签到做完后没能回到主页，后面的没做", task._why)
+        self.assertEqual("['公会签到']", infos["完成"])
+        self.assertEqual("['小屋签到', '一键收菜']", infos["跳过"])
 
 
 if __name__ == "__main__":

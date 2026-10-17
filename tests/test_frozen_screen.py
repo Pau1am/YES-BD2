@@ -68,6 +68,19 @@ class FrozenWatchTest(unittest.TestCase):
         watch.look(frame, later)
         watch.look(frame, later + FROZEN_SCREEN_SECONDS - 1)
 
+    def test_a_recognised_target_starts_the_count_over(self):
+        # Leo 2026-10-15 「10秒是卡死 或者辨識不到」: a still page being read is
+        # not stuck (a slow 1080p PC read the buy page for over 10 s).
+        watch = FrozenWatch()
+        frame = _screen()
+        limit = int(FROZEN_SCREEN_SECONDS)
+        for second in range(limit - 1):
+            watch.look(frame, float(second))
+        watch.progress()
+        for second in range(limit - 1, 2 * limit - 2):
+            watch.look(frame, float(second))
+        self.assertEqual(0, watch.ineffective)
+
     def test_paused_while_going_home(self):
         watch = FrozenWatch()
         watch.paused = 1

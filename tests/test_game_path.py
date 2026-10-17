@@ -7,7 +7,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.game_path import (
+    _existing_game_path,
     _registry_install_values,
+    _windows_drive_roots,
     calculate_pc_exe_path,
     get_launch_game_id,
     get_launcher_exe_names,
@@ -241,6 +243,50 @@ class GamePathTest(unittest.TestCase):
                 str(launcher_path),
             )
             self.assertEqual(DeviceManager.config["pc_full_path"], str(launcher_path))
+
+
+class BrokenDriveTest(unittest.TestCase):
+    """A player's start failed with 「[WinError 87] 参数错误。: 'F:\\'」
+    (2026-10-17): Path.exists() lets that error through."""
+
+    @staticmethod
+    def _invalid_parameter(path):
+        error = OSError(22, "参数错误。", str(path))
+        error.winerror = 87
+        return error
+
+    def test_a_drive_that_errors_is_skipped(self):
+        def exists(path):
+            if str(path).upper().startswith("F:"):
+                raise self._invalid_parameter(path)
+            return str(path).upper().startswith(("C:", "D:"))
+
+        with (
+            patch("src.game_path.os.name", "nt"),
+            patch("src.game_path.Path.exists", exists),
+        ):
+            roots = [str(root)[:1] for root in _windows_drive_roots()]
+
+        self.assertEqual(["C", "D"], roots)
+
+    def test_a_candidate_that_errors_is_skipped(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            good = Path(temp_dir) / "BrownDust II.exe"
+            good.write_bytes(b"")
+            real_is_file = Path.is_file
+
+            def is_file(path):
+                if "broken" in str(path):
+                    raise self._invalid_parameter(path)
+                return real_is_file(path)
+
+            with patch("src.game_path.Path.is_file", is_file):
+                found = _existing_game_path(
+                    [Path(temp_dir) / "broken" / "BrownDust II.exe", good],
+                    ["BrownDust II.exe"],
+                )
+
+        self.assertEqual(str(good), found)
 
 
 if __name__ == "__main__":

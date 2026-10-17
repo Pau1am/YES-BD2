@@ -368,7 +368,7 @@ class BuyConfirmCloseTest(unittest.TestCase):
         trader._status = lambda *a: None
         frame = np.zeros((1080, 1920, 3), np.uint8)
         trader._wait_for_buy_all_favorites_state = lambda: ((1454, 1004), frame)
-        trader._wait_for_purchase_confirmation = lambda: True
+        trader._wait_for_purchase_confirmation = lambda *a, **k: True
         results = iter(closed)
         trader._wait_purchase_dialog_closed = lambda: next(results)
         return trader, clicks, warnings
@@ -383,6 +383,68 @@ class BuyConfirmCloseTest(unittest.TestCase):
         self.assertFalse(trader.buy_all_favorites())
         self.assertEqual(2, len(clicks))
         self.assertTrue(warnings)
+
+
+class BuyFirstPressTest(unittest.TestCase):
+    """A 一键购买全部收藏 press that opened nothing (a player's 1080p run sat
+    10 s on the unchanged shop and the stuck guard stopped it, 2026-10-16)."""
+
+    def _trader(self, confirmations, *, button_again=True, dialog_partly=False):
+        import numpy as np
+
+        from src.tasks.map_trade.trader_buy import BuyFlowMixin
+
+        trader = object.__new__(BuyFlowMixin)
+        presses, warnings, waits = [], [], []
+        trader.task = SimpleNamespace(
+            operate_click=lambda *a, **k: None,
+            sleep=lambda *a: None,
+            log_info=lambda *a, **k: None,
+            log_warning=lambda message, **k: warnings.append(message),
+        )
+        trader.vision = SimpleNamespace(click_client=lambda center, *a, **k: presses.append(center))
+        trader._status = lambda *a: None
+        frame = np.zeros((1080, 1920, 3), np.uint8)
+
+        def wait_button(*_a):
+            waits.append(1)
+            return ((1454, 1004), frame) if button_again else None
+
+        trader._wait_for_buy_all_favorites_state = wait_button
+        results = iter(confirmations)
+        trader._wait_for_purchase_confirmation = lambda *a, **k: next(results)
+        trader._purchase_dialog_partly_read = lambda: dialog_partly
+        trader._wait_purchase_dialog_closed = lambda: True
+        return trader, frame, presses, warnings, waits
+
+    def test_the_button_read_by_run_buy_is_pressed_without_reading_again(self):
+        trader, frame, presses, _, waits = self._trader([True])
+        self.assertTrue(trader.buy_all_favorites(located=((1454, 1004), frame)))
+        self.assertEqual([], waits)
+        self.assertEqual([(1454, 1004)], presses)
+
+    def test_a_press_that_opened_nothing_is_pressed_once_more(self):
+        trader, frame, presses, warnings, _ = self._trader([False, True])
+        self.assertTrue(trader.buy_all_favorites(located=((1454, 1004), frame)))
+        self.assertEqual(2, len(presses))
+        self.assertEqual([], warnings)
+
+    def test_no_dialog_after_two_presses_stops_with_the_reason(self):
+        trader, frame, presses, warnings, _ = self._trader([False, False])
+        self.assertFalse(trader.buy_all_favorites(located=((1454, 1004), frame)))
+        self.assertEqual(2, len(presses))
+        self.assertIn("确认弹窗", warnings[-1])
+
+    def test_no_second_press_when_the_button_is_gone(self):
+        trader, frame, presses, warnings, _ = self._trader([False], button_again=False)
+        self.assertFalse(trader.buy_all_favorites(located=((1454, 1004), frame)))
+        self.assertEqual(1, len(presses))
+        self.assertTrue(warnings)
+
+    def test_a_slow_dialog_is_waited_for_not_pressed_again(self):
+        trader, frame, presses, _, _ = self._trader([False, True], dialog_partly=True)
+        self.assertTrue(trader.buy_all_favorites(located=((1454, 1004), frame)))
+        self.assertEqual(1, len(presses))
 
 
 class SoldOutTest(unittest.TestCase):

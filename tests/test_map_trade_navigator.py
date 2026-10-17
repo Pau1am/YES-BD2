@@ -18,6 +18,7 @@ from src.tasks.map_trade.models import (
     NavigationResult,
     ScreenState,
 )
+from src.tasks.map_trade.navigator_sandbox import NOT_BY_CIRCLE_MESSAGE
 from src.tasks.map_trade.navigator import (
     Navigator,
 )
@@ -641,6 +642,86 @@ class NavigatorTest(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(MapPageMode.DIRECT_TELEPORT, result.map_page_mode)
+
+    def _hunting_ground_navigator(self, opened_after_key):
+        navigator = Navigator(SimpleNamespace(), SimpleNamespace())
+        navigator._status = lambda *_args: None
+        keys = []
+        navigator.task = SimpleNamespace(
+            tap_key=lambda key, after_sleep=0.0: keys.append(key) or True,
+            log_info=lambda *_a, **_k: None,
+        )
+        navigator.open_teleport_map_from_sandbox = lambda: NavigationResult(
+            False, ScreenState.SANDBOX, NOT_BY_CIRCLE_MESSAGE
+        )
+        navigator._wait_for_sandbox_map_open = lambda *_a, **_k: opened_after_key
+        return navigator, keys
+
+    def test_hunting_ground_hand_not_read_presses_f(self):
+        # Leo 2026-10-17 「傳到狩獵場一定會有手勢可以按 沒辨識到就按f」.
+        opened = NavigationResult(
+            True, ScreenState.AREA_MAP, map_page_mode=MapPageMode.DIRECT_TELEPORT
+        )
+        navigator, keys = self._hunting_ground_navigator(opened)
+
+        result = navigator._open_teleport_map_at_hunting_ground()
+
+        self.assertTrue(result.success)
+        self.assertEqual(["F"], keys)
+
+    def test_hunting_ground_f_without_map_names_the_step(self):
+        navigator, keys = self._hunting_ground_navigator(
+            NavigationResult(False, ScreenState.UNKNOWN, "没打开")
+        )
+
+        result = navigator._open_teleport_map_at_hunting_ground()
+
+        self.assertFalse(result.success)
+        self.assertEqual(["F"], keys)
+        self.assertIn("按 F 后也没打开传送阵地图", result.message)
+
+    def test_hunting_ground_hand_pressed_but_map_failed_sends_no_f(self):
+        navigator, keys = self._hunting_ground_navigator(None)
+        navigator.open_teleport_map_from_sandbox = lambda: NavigationResult(
+            False, ScreenState.UNKNOWN, "点击传送阵交互按钮后未确认传送阵地图"
+        )
+
+        result = navigator._open_teleport_map_at_hunting_ground()
+
+        self.assertFalse(result.success)
+        self.assertEqual([], keys)
+
+    def test_restart_via_hunting_ground_uses_the_f_fallback(self):
+        card = CARD_BY_ID["Q_sp10"]
+        navigator = Navigator(SimpleNamespace(), SimpleNamespace())
+        navigator.ensure_small_minimap = lambda: True
+        navigator._click_sandbox_teleport_interaction = lambda *a, **k: False
+        navigator._travel_to_hunting_ground = lambda: "狩猎场"
+        failed = NavigationResult(False, ScreenState.SANDBOX, "按 F 后也没打开传送阵地图")
+        calls = []
+        navigator._open_teleport_map_at_hunting_ground = lambda: calls.append(1) or failed
+
+        result = navigator.prepare_collection_main_area(card.card_id, via_hunting_ground=True)
+
+        self.assertEqual([1], calls)
+        self.assertIs(failed, result)
+
+    def test_no_way_to_a_circle_names_the_last_failure(self):
+        navigator = Navigator(SimpleNamespace(), SimpleNamespace())
+        navigator._status = lambda *_args: None
+        navigator.open_teleport_map_from_sandbox = lambda: NavigationResult(
+            False, ScreenState.SANDBOX, NOT_BY_CIRCLE_MESSAGE
+        )
+        navigator._walk_to_sandbox_teleport_interaction = lambda: NavigationResult(
+            False, ScreenState.SANDBOX, "地图上没找到传送门"
+        )
+        navigator._travel_to_hunting_ground = lambda: None
+
+        result = navigator._open_teleport_map_anywhere()
+
+        self.assertFalse(result.success)
+        self.assertIn("地图上没找到传送门", result.message)
+        self.assertIn("小地图导航也没能去狩猎场或艾琳", result.message)
 
     def test_teleport_map_page_arrows_are_strict_and_directional(self):
         self.assertEqual("image/green/TpMapLeft.png", TELEPORT_MAP_FORWARD_TEMPLATE.file_name)

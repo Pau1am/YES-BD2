@@ -193,10 +193,16 @@ class PvpEntryTest(unittest.TestCase):
         self.assertTrue(PVPTask._enter_pvp_from_home(task))
         self.assertEqual([HOME_CARTRIDGE_MACHINE_POINT, (265, 450), (265, 450)], game.clicks)
 
-    def test_the_card_is_pressed_twice_at_most(self):
+    def test_two_swallowed_card_presses_are_made_again(self):
+        # Player via Leo 2026-10-17 「切换卡带的时候可以点两下」.
+        game = _Game(self, card_swallows=2)
+        self.assertTrue(PVPTask._enter_pvp_from_home(game.task()))
+        self.assertEqual([HOME_CARTRIDGE_MACHINE_POINT] + [(265, 450)] * 3, game.clicks)
+
+    def test_the_card_is_pressed_three_times_at_most(self):
         game = _Game(self, card_swallows=99)
         self.assertFalse(PVPTask._enter_pvp_from_home(game.task()))
-        self.assertEqual([HOME_CARTRIDGE_MACHINE_POINT, (265, 450), (265, 450)], game.clicks)
+        self.assertEqual([HOME_CARTRIDGE_MACHINE_POINT] + [(265, 450)] * 3, game.clicks)
 
     def test_the_shelf_is_scrolled_until_the_battle_row_shows(self):
         game = _Game(self, row_after_scrolls=3)
