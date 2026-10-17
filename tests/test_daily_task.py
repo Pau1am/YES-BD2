@@ -818,12 +818,16 @@ class DailyTaskHelperTest(unittest.TestCase):
         task._wait_guild_page = lambda _timeout: ("page", "公告事项 进入公会联合战")
         task._ocr_text = lambda _frame, name: ""
         task._keyword_match_count = lambda text, keywords: 0
-        # 依次为：入口前主页确认（通过）、返回主页第 1 次确认（失败）。
-        confirm_results = iter([True, False])
+        blanks = []
+        task.operate_click = lambda x, y, **_kwargs: blanks.append((x, y))
+        # 依次为：入口前主页确认（通过）、返回主页第 1 次确认（失败）、
+        # 点空白处关弹窗后再确认（失败）。
+        confirm_results = iter([True, False, False])
         task._wait_for_home_confirmation = lambda name, **_kwargs: next(confirm_results)
 
         self.assertFalse(DailyTask.run_guild_sign_in(task))
         self.assertEqual([(370, 155), (100, 50)], clicks)
+        self.assertEqual(1, len(blanks))
 
     def test_guild_page_alone_counts_as_signed_in(self):
         # No 签到成功 toast (already signed in today): the page UI is enough.
@@ -834,6 +838,22 @@ class DailyTaskHelperTest(unittest.TestCase):
         texts = iter(["", "公会 公告事项 进入公会联合战 公会商店"])
         task._ocr_text = lambda _frame, name=None: next(texts)
         self.assertEqual("page", DailyTask._wait_guild_page(task, 60.0)[0])
+
+    def test_guild_return_closes_event_popup_over_home(self):
+        # 2K 桌面分身 2026-10-16: a dark 万圣节每日钻石通行证 popup over home
+        # failed the guild item although the sign-in had worked.
+        task = object.__new__(DailyTask)
+        clicks = []
+        task._click_reference = lambda *point, **_k: clicks.append(("back", point))
+        task.operate_click = lambda x, y, **_k: clicks.append(("blank", (x, y)))
+        homes = iter([False, True])
+        task._wait_for_home_confirmation = lambda *_a, **_k: next(homes)
+        task.capture_frame = lambda: None
+        task._ocr_text = lambda _frame, name=None: "万圣节每日钻石通行证 活动期间"
+        task.log_info = lambda *_a, **_k: None
+        task._status_set = lambda *_a: None
+        self.assertTrue(DailyTask._return_home_from_guild(task))
+        self.assertEqual(["back", "blank"], [kind for kind, _point in clicks])
 
     def test_guild_page_not_confirmed_times_out(self):
         task = object.__new__(DailyTask)

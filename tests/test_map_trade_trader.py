@@ -77,6 +77,7 @@ from src.tasks.map_trade.navigator_constants import (
     MAP_MERCHANT_ICON_TIMEOUT,
     MERCHANT_ARRIVAL_TIMEOUT,
     MERCHANT_NAV_CONFIRM_OCR_ROI,
+    MERCHANT_NAV_GUIDE_REFERENCE_POINT,
     MERCHANT_NAV_GUIDE_TEMPLATE,
     MERCHANT_NAV_GUIDE_TIMEOUT,
     MERCHANT_NAV_LANDMARK_TIMEOUT,
@@ -3154,8 +3155,21 @@ class TradeMerchantNavigationTest(unittest.TestCase):
         )
         return self._navigator(vision)
 
-    def test_walk_to_merchant_fails_without_ocr_when_guide_button_missing(self):
+    def _guide_missing_navigator(self, *, in_field: bool):
         navigator = self._walk_navigator(guide=False)
+        navigator.vision.capture = lambda: "frame"
+        navigator.vision.match = lambda _frame, _spec: None
+        navigator.vision.passes = lambda _result, _spec: False
+        navigator.vision.click_reference = lambda x, y, after_sleep: self.events.append(
+            ("reference", (x, y))
+        )
+        navigator.classify = lambda _frame=None: (
+            ScreenState.SANDBOX if in_field else ScreenState.UNKNOWN
+        )
+        return navigator
+
+    def test_walk_to_merchant_fails_without_ocr_when_guide_button_missing(self):
+        navigator = self._guide_missing_navigator(in_field=False)
         navigator._confirm_travel = lambda: self.fail("no travel without the guide menu")
 
         self.assertFalse(navigator._walk_to_merchant())
@@ -3164,6 +3178,24 @@ class TradeMerchantNavigationTest(unittest.TestCase):
             self.events,
         )
         self.assertTrue(self.warnings)
+
+    def test_walk_to_merchant_presses_guide_place_when_field_is_confirmed(self):
+        # 2K 桌面分身 2026-10-16: the guide template read -1.000 all run while
+        # the quick-switch button passed; 跑商 never reached the merchant.
+        navigator = self._guide_missing_navigator(in_field=True)
+        navigator._confirm_travel = lambda: self.events.append("confirm_travel") or "moving"
+        navigator._wait_for_merchant_prompt = lambda timeout: True
+
+        self.assertTrue(navigator._walk_to_merchant())
+        self.assertEqual(
+            [
+                ("template", MERCHANT_NAV_GUIDE_TEMPLATE, MERCHANT_NAV_GUIDE_TIMEOUT),
+                ("reference", MERCHANT_NAV_GUIDE_REFERENCE_POINT),
+                ("ocr", ("商店",), MERCHANT_NAV_MENU_OCR_ROI, "商店导航"),
+                "confirm_travel",
+            ],
+            self.events,
+        )
 
     def test_walk_to_merchant_teleports_via_shop_destination_then_waits_for_prompt(self):
         navigator = self._walk_navigator()

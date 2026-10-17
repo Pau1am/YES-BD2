@@ -2816,7 +2816,8 @@ class GreyNeedsSearchTest(unittest.TestCase):
 
 
 class GreyAbsorbSkipsMapTest(unittest.TestCase):
-    """Leo 2026-10-07: a grey 吸收 on a battle map skips 召集/压制 too."""
+    """Leo 2026-10-07: a grey 吸收 on a battle map skips 召集 when 召集 is grey
+    too; 压制 is always judged on its own icon (Leo 2026-10-15/16)."""
 
     def _grey_absorb_run(self, summon_grey: bool, card_id: str = "Q_sp12"):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2853,11 +2854,16 @@ class GreyAbsorbSkipsMapTest(unittest.TestCase):
             }
             return prepared, results, states
 
-    def test_grey_absorb_and_grey_summon_skip_suppress(self):
-        prepared, results, states = self._grey_absorb_run(summon_grey=True)
-        self.assertEqual(["吸收", "召集"], prepared)
-        self.assertTrue(all(result.completed for result in results))
-        self.assertEqual(CollectionActionState.SETTLED.value, states["压制"])
+    def test_grey_absorb_and_grey_summon_still_judge_suppress(self):
+        # Leo 2026-10-16: 戏水女王 / 角色卡7 battle areas skipped 压制.
+        prepared, results, _states = self._grey_absorb_run(summon_grey=True)
+        self.assertEqual(["吸收", "召集", "压制"], prepared)
+        self.assertEqual("压制可按", results[-1].message)
+
+    def test_splash_queen_battle_area_presses_suppress(self):
+        prepared, results, _states = self._grey_absorb_run(summon_grey=True, card_id="Q_ep7")
+        self.assertEqual(["吸收", "召集", "压制"], prepared)
+        self.assertEqual("压制可按", results[-1].message)
 
     def test_grey_absorb_with_bright_summon_goes_on(self):
         # Splash Queen's battle map (live 4K 2026-10-09): 吸收 done by hand,

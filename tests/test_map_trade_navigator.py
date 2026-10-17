@@ -443,7 +443,7 @@ class NavigatorTest(unittest.TestCase):
             left=True,
         )
         navigator._wait_for_collection_teleport_map = lambda _card: initial
-        navigator._move_area_map = lambda _card, _context, direction: (
+        navigator._move_area_map = lambda _card, _context, direction, **_k: (
             moves.append(direction) or next(contexts)
         )
         navigator._wait_for_story_sandbox = lambda number: NavigationResult(
@@ -498,7 +498,7 @@ class NavigatorTest(unittest.TestCase):
             right=True,
             page_mode=MapPageMode.GENERATE_TELEPORT,
         )
-        navigator._move_area_map = lambda _card, _context, direction: (
+        navigator._move_area_map = lambda _card, _context, direction, **_k: (
             moves.append(direction)
             or self._area_context(
                 target.title,
@@ -647,10 +647,11 @@ class NavigatorTest(unittest.TestCase):
         self.assertEqual("image/green/TpMapRight.png", TELEPORT_MAP_BACKWARD_TEMPLATE.file_name)
         for spec in (TELEPORT_MAP_FORWARD_TEMPLATE, TELEPORT_MAP_BACKWARD_TEMPLATE):
             with self.subTest(spec=spec.name):
-                self.assertEqual(0.95, spec.threshold)
+                # 0.93: the 1080p 桌面分身 卡勒塔市 left arrow read 0.948.
+                self.assertEqual(0.93, spec.threshold)
                 self.assertEqual(0.85, spec.min_pixel_score)
                 self.assertEqual(0.90, spec.min_zncc_score)
-                self.assertEqual(0.95, spec.minimum_safe_threshold)
+                self.assertEqual(0.93, spec.minimum_safe_threshold)
                 self.assertIsNone(spec.roi)
                 self.assertIsNone(spec.relative_roi)
 
@@ -1531,7 +1532,7 @@ class CollectionPageSeekTest(unittest.TestCase):
         position = [start]
         moves = []
 
-        def move(_card, _context, direction):
+        def move(_card, _context, direction, force=False):
             step = 1 if direction == "right" else -1
             if not 0 <= position[0] + step < len(pages):
                 return None
@@ -1608,7 +1609,7 @@ class CollectionPageSeekTest(unittest.TestCase):
         position = [start]
         attempts = []
 
-        def move(_card, _context, direction):
+        def move(_card, _context, direction, force=False):
             attempts.append(direction)
             step = 1 if direction == "right" else -1
             if not 0 <= position[0] + step < len(pages):
