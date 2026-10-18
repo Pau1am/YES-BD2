@@ -13,6 +13,8 @@ from src.utils.frozen_screen import (
     FROZEN_SCREEN_SECONDS,
     FrozenScreen,
     FrozenWatch,
+    LOADING_WORDS_SECONDS,
+    loading_words,
 )
 
 
@@ -86,6 +88,63 @@ class FrozenWatchTest(unittest.TestCase):
         watch.paused = 1
         for second in range(3 * int(FROZEN_SCREEN_SECONDS)):
             watch.look(_screen(), float(second))
+
+
+class LoadingWordsHoldTest(unittest.TestCase):
+    """Leo 2026-10-18 「有人電腦比較卡」: a still loading screen that is not
+    black is waited for like the black one."""
+
+    def test_loading_words(self):
+        self.assertEqual("nowloading", loading_words("NOW LOADING"))
+        self.assertEqual("连接中", loading_words("正在 连接中…"))
+        self.assertEqual("", loading_words("3rd ANNIVERSARY BROWNDUSTII 棕色尘埃2"))
+        self.assertEqual("", loading_words("我的小屋 好友 公会"))
+
+    def test_a_held_screen_waits_up_to_twenty_seconds(self):
+        watch = FrozenWatch()
+        frame = _screen()
+        now = 0.0
+        while now < FROZEN_SCREEN_SECONDS:
+            watch.look(frame, now)
+            now += 1.0
+        with self.assertRaises(FrozenScreen) as first:
+            watch.look(frame, now)
+        self.assertEqual("", str(first.exception))
+        watch.hold_for_loading("连接中")
+        while now < LOADING_WORDS_SECONDS - 1.0:
+            now += 1.0
+            watch.look(frame, now)
+        with self.assertRaises(FrozenScreen) as second:
+            watch.look(frame, LOADING_WORDS_SECONDS)
+        self.assertEqual(
+            "画面停在「连接中」20 秒没有结束（可能网络或电脑比较慢）", str(second.exception)
+        )
+
+    def test_a_new_picture_ends_the_hold(self):
+        watch = FrozenWatch()
+        watch.hold_for_loading()
+        watch.look(_screen(), 0.0)
+        watch.look(_screen(30), 1.0)
+        self.assertFalse(watch.loading_hold)
+
+    def test_capture_frame_holds_only_for_loading_words(self):
+        for words, held in (("NOW LOADING", True), ("公会商店", False)):
+            task = object.__new__(base_module.BaseBD2Task)
+            task.next_frame = lambda: _screen()
+            task.info_set = lambda *_a: None
+            task.log_info = lambda *_a, **_k: None
+            task.ocr = lambda **_k: [SimpleNamespace(name=words)]
+            task._frozen_watch = watch = FrozenWatch()
+            watch.fired = True
+            with mock.patch.object(
+                base_module.BaseBD2Task, "capture_method_name", new_callable=mock.PropertyMock, return_value="x"
+            ):
+                if held:
+                    base_module.BaseBD2Task.capture_frame(task)
+                    self.assertTrue(watch.loading_hold)
+                else:
+                    with self.assertRaises(FrozenScreen):
+                        base_module.BaseBD2Task.capture_frame(task)
 
 
 class RunWatchedTest(unittest.TestCase):
