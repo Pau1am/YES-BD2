@@ -1327,7 +1327,7 @@ class DailyTaskHelperTest(unittest.TestCase):
             QUICK_HUNT_MAP_SCAN_ROI,
         )
         self.assertEqual(
-            (135 / 1920, 205 / 1080, 168 / 1920, 337 / 1080),
+            (100 / 1920, 185 / 1080, 215 / 1920, 370 / 1080),
             QUICK_HUNT_DOUBLE_ROI,
         )
         self.assertEqual(

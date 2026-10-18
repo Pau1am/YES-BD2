@@ -166,6 +166,36 @@ class EventWalkTest(unittest.TestCase):
         self.assertEqual([("艾琳",)], travelled)
         self.assertEqual([(682, 392), (682, 392)], clicks)
 
+    def _ep7_with_question(self, confirmed):
+        # Player 2026-10-17 (v0.1.44): the exit click opens the 自动移动
+        # question; the header stays readable above it.
+        card = CARD_BY_ID["Q_ep7"]
+        here = card.targets[0].title
+        navigator, clicks = self._navigator([here, "战斗Ⅰ" + card.targets[1].title], [here, here, ""])
+        asked = iter([True, False])
+        navigator._walk_text = lambda frame: "是否自动移动前往所选目的地" if next(asked, False) else ""
+        pressed, cancelled = [], []
+        navigator._click_sandbox_navigation_destination_confirmation = (
+            lambda frame: pressed.append(1) or confirmed
+        )
+        navigator._cancel_auto_move_dialog = lambda frame=None: cancelled.append(1) or True
+        navigator._travel_via_nav_menu = lambda *entries: None
+        return navigator, card, clicks, pressed, cancelled
+
+    def test_the_auto_move_question_after_an_exit_click_is_confirmed(self):
+        navigator, card, clicks, pressed, cancelled = self._ep7_with_question(True)
+        result = navigator._walk_to_collection_map(card, card.targets[0], card.targets[1])
+        self.assertTrue(result.success, result.message)
+        self.assertEqual([(748, 585)], clicks)
+        self.assertEqual([1], pressed)
+        self.assertEqual([], cancelled)
+
+    def test_an_unconfirmed_question_is_cancelled_before_the_next_spot(self):
+        navigator, card, clicks, pressed, cancelled = self._ep7_with_question(False)
+        navigator._walk_to_collection_map(card, card.targets[0], card.targets[1])
+        self.assertEqual([1], cancelled)
+        self.assertEqual([(748, 585), (748, 565)], clicks)
+
     def test_back_to_the_town_goes_to_erin_first(self):
         card = CARD_BY_ID["Q_ep5"]
         navigator, clicks = self._navigator([], [])
