@@ -146,6 +146,19 @@ class SkipBrokenCardTest(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertTrue(result.message.startswith("第1章、第2章这次跳过"))
 
+    def test_cards_skipped_for_one_reason_share_it(self):
+        # Player 2026-10-19: nine chapters skipped; the report cut off the
+        # reasons after 第3章, so 第5–11章's were never seen.
+        result, _events, _warnings, _state = self._run(
+            ("Q_sp2", "Q_sp3", "Q_sp5", "Q_sp6", "Q_sp7"),
+            select=lambda card_id, **_k: NOT_FOUND,
+        )
+        self.assertTrue(result.message.startswith("第2章、第3章、第5章至第7章这次跳过"))
+        self.assertIn("（原因：第2章、第3章、第5章至第7章都进不去", result.message)
+        self.assertEqual(1, result.message.count("进不去"))
+        stage = [value for key, value in self.infos if key == "当前阶段"][-1]
+        self.assertEqual("地图采集：第2章、第3章、第5章至第7章跳过，没有完成", stage)
+
     def test_a_route_that_breaks_twice_skips_the_card(self):
         def advance(card_id, current, target):
             ok = card_id != "Q_sp1" or target.key != "battle_area_2"

@@ -565,7 +565,7 @@ class NavigatorTest(unittest.TestCase):
 
         reads = iter(reads)
 
-        def boxes(_frame, _name, _roi):
+        def boxes(_frame, _name, _roi, **_kwargs):
             return [
                 SimpleNamespace(name=text, x=300, y=100 + 60 * row, width=80, height=30)
                 for row, text in enumerate(next(reads))
@@ -605,8 +605,38 @@ class NavigatorTest(unittest.TestCase):
 
         self.assertEqual("狩猎场", entry)
 
+    def test_nav_menu_takes_hunting_ground_with_one_character_misread(self):
+        menu = ["旅馆", "狩猎扬", "快速狩猎", "艾琳"]
+        navigator = self._menu_navigator([menu, menu])
+
+        entry, point, _shape = navigator._nav_menu_choice(("狩猎场", "艾琳"))
+
+        self.assertEqual("狩猎场", entry)
+        self.assertEqual((340, 175), point)
+
+    def test_nav_menu_is_read_at_twice_the_size_before_giving_up(self):
+        reads = []
+
+        def boxes(_frame, _name, _roi, ocr_scale=1.0):
+            reads.append(ocr_scale)
+            text = "狩猎场" if ocr_scale == 2.0 else "狩"
+            return [SimpleNamespace(name=text, x=300, y=100, width=80, height=30)]
+
+        vision = SimpleNamespace(
+            capture=lambda: np.zeros((1080, 1920, 3), np.uint8),
+            ocr_boxes=boxes,
+            simplify=lambda text: text,
+        )
+        navigator = Navigator(SimpleNamespace(sleep=lambda *_a: None), vision)
+        with patch("src.tasks.map_trade.navigator_sandbox.MERCHANT_NAV_MENU_OCR_TIMEOUT", 0.0):
+            entry, _point, _shape = navigator._nav_menu_choice(("狩猎场", "艾琳"))
+
+        self.assertEqual("狩猎场", entry)
+        self.assertEqual([1.0, 2.0], reads)
+
     def test_nav_menu_without_either_entry_gives_up(self):
-        navigator = self._menu_navigator([["旅馆", "商店"]])
+        # Read at 1× and once more at 2×.
+        navigator = self._menu_navigator([["旅馆", "商店"], ["旅馆", "商店"]])
 
         with patch("src.tasks.map_trade.navigator_sandbox.MERCHANT_NAV_MENU_OCR_TIMEOUT", 0.0):
             self.assertIsNone(navigator._nav_menu_choice(("狩猎场", "艾琳")))
@@ -2191,7 +2221,7 @@ class LostPressTest(unittest.TestCase):
         def landed():
             return lands_on is not None and len(presses) >= lands_on
 
-        def boxes(_frame, _name, _roi):
+        def boxes(_frame, _name, _roi, **_kwargs):
             if landed() and not dialog:
                 return []
             return [
@@ -2246,6 +2276,8 @@ class LostPressTest(unittest.TestCase):
         self.assertEqual(2, len(presses))
         self.assertEqual([], trips)
         self.assertTrue(any("没有反应" in text for text in warnings))
+        # The run's message can say which part of the ≡ trip failed.
+        self.assertEqual("点了≡菜单的狩猎场没有反应", navigator._nav_failure)
 
     def test_the_travel_dialog_over_the_menu_counts_as_taken(self):
         navigator, presses, clock, trips, _warnings = self._nav_menu_navigator(
