@@ -69,6 +69,10 @@ class LookTest(unittest.TestCase):
         self.addCleanup(colour_check.forget_capture)
         previous = colour_check.last_check()
         self.addCleanup(lambda: colour_check.remember(previous))
+        # The test frames are black; home counts as not dimmed unless a test says so.
+        bright = mock.patch.object(setup_check, "home_left_column_brightness", lambda _f: 255.0)
+        bright.start()
+        self.addCleanup(bright.stop)
 
     def test_traditional_home_on_two_frames_stops_with_a_reminder(self):
         task = _Task()
@@ -149,6 +153,18 @@ class LookTest(unittest.TestCase):
             task.warnings,
         )
         self.assertEqual(40.0, colour_check.last_check().distance)
+
+    def test_home_dimmed_by_a_notice_is_no_colour_reading(self):
+        # 桌面分身 2026-10-18: the login notice dimmed home (56/185) and the
+        # dimmed top bar read as HDR.
+        task = _Task()
+        reads, _calls = _reads(SIMPLIFIED_LEFT)
+        with reads, _colours(150.0), mock.patch.object(
+            setup_check, "home_left_column_brightness", lambda _f: 56.0
+        ):
+            self.assertEqual("", setup_check.look(task))
+        self.assertEqual([], task.warnings)
+        self.assertNotIn(setup_check.COLOUR_KEY, task.info)
 
     def test_normal_colours_say_nothing(self):
         task = _Task()

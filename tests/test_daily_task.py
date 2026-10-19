@@ -865,6 +865,38 @@ class DailyTaskHelperTest(unittest.TestCase):
         self.assertTrue(DailyTask._return_home_from_guild(task))
         self.assertEqual(["back", "blank"], [kind for kind, _point in clicks])
 
+    def test_guild_return_presses_back_again_after_a_short_look(self):
+        # 桌面分身 2026-10-18: two swallowed presses cost 4 s each before.
+        task = object.__new__(DailyTask)
+        clicks = []
+        looks = []
+        task._click_reference = lambda *point, **_k: clicks.append(point)
+
+        def home(*_a, timeout=None, **_k):
+            looks.append(timeout)
+            return len(looks) == 3
+
+        task._wait_for_home_confirmation = home
+        task.capture_frame = lambda: None
+        task._ocr_text = lambda _frame, name=None: "公会商店 公告事项 进入公会联合战"
+        task.log_info = lambda *_a, **_k: None
+        task._status_set = lambda *_a: None
+        self.assertTrue(DailyTask._return_home_from_guild(task))
+        self.assertEqual(3, len(clicks))
+        self.assertEqual([2.0, 2.0, 2.0], looks)
+
+    def test_guild_return_last_press_looks_longer(self):
+        task = object.__new__(DailyTask)
+        looks = []
+        task._click_reference = lambda *_p, **_k: None
+        task._wait_for_home_confirmation = lambda *_a, timeout=None, **_k: looks.append(timeout) or False
+        task.capture_frame = lambda: None
+        task._ocr_text = lambda _frame, name=None: "公会商店 公告事项 进入公会联合战"
+        task.log_info = lambda *_a, **_k: None
+        task._status_set = lambda *_a: None
+        self.assertFalse(DailyTask._return_home_from_guild(task))
+        self.assertEqual([2.0, 2.0, 2.0, 4.0], looks)
+
     def test_guild_page_not_confirmed_times_out(self):
         task = object.__new__(DailyTask)
         task.config = {}
@@ -1299,7 +1331,7 @@ class DailyTaskHelperTest(unittest.TestCase):
 
     def test_quick_hunt_regions_preserve_all_supplied_1920_calibrations(self):
         self.assertEqual(
-            (1602 / 1920, 38 / 1080, 1724 / 1920, 80 / 1080),
+            (1602 / 1920, 38 / 1080, 1880 / 1920, 80 / 1080),  # widened 2026-10-19
             QUICK_HUNT_RESOURCE_ROI,
         )
         self.assertEqual(

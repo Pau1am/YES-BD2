@@ -335,3 +335,67 @@ class ProgressWaitTest(unittest.TestCase):
         wait = ProgressWait(0.0)
         black = np.full((80, 80, 3), 10, np.uint8)
         self.assertTrue(wait.over(black, LOADING_MAX_SECONDS, loading=True))
+
+
+class ChangedByPressTest(unittest.TestCase):
+    """Leo 2026-10-19 「記得我說的10秒是什麼狀況」「可以20秒」: 10 s is for a press
+    that did nothing; a screen the press changed is loading, whatever it
+    looks like (the 2K clone's bright 「FANTASIA SQUARE」 splash, cut at 10 s)."""
+
+    PAGE = np.full((90, 160, 3), 60, np.uint8)
+    SPLASH = np.full((90, 160, 3), 230, np.uint8)
+
+    def test_a_still_screen_the_press_changed_waits_twenty_seconds(self):
+        from src.utils.wait_limits import CHANGED_LOAD_SECONDS, STUCK_SECONDS, load_wait, scene
+
+        wait = load_wait(0.0, STUCK_SECONDS, before=scene(self.PAGE))
+        self.assertFalse(wait.over(self.SPLASH, 0.0))
+        self.assertFalse(wait.over(self.SPLASH, STUCK_SECONDS + 3))
+        self.assertFalse(wait.over(self.SPLASH, CHANGED_LOAD_SECONDS - 1))
+        self.assertTrue(wait.over(self.SPLASH, CHANGED_LOAD_SECONDS))
+
+    def test_a_press_that_changed_nothing_is_stuck_after_ten_seconds(self):
+        from src.utils.wait_limits import STUCK_SECONDS, load_wait, scene
+
+        for before in (scene(self.PAGE), None):
+            wait = load_wait(0.0, STUCK_SECONDS, before=before)
+            self.assertFalse(wait.over(self.PAGE, 0.0))
+            self.assertFalse(wait.over(self.PAGE, STUCK_SECONDS - 1))
+            self.assertTrue(wait.over(self.PAGE, STUCK_SECONDS))
+
+    def test_the_frozen_watch_follows_the_same_rule(self):
+        from src.utils.wait_limits import CHANGED_LOAD_SECONDS
+
+        watch = FrozenWatch()
+        watch.look(_screen(60), 0.0)
+        watch.pressed()
+        for t in range(1, int(CHANGED_LOAD_SECONDS)):
+            watch.look(_screen(230), float(t))
+        with self.assertRaises(FrozenScreen) as raised:
+            watch.look(_screen(230), CHANGED_LOAD_SECONDS + 1)
+        self.assertIn("画面换了", str(raised.exception))
+
+        watch = FrozenWatch()
+        watch.look(_screen(60), 0.0)
+        watch.pressed()
+        with self.assertRaises(FrozenScreen):
+            for t in range(1, int(FROZEN_SCREEN_SECONDS) + 2):
+                watch.look(_screen(60), float(t))
+
+    def test_capture_and_press_keep_the_screen_before_the_press(self):
+        from src.utils.wait_limits import scene, scene_at_press
+
+        task = object.__new__(base_module.BaseBD2Task)
+        frames = iter([self.PAGE, self.SPLASH])
+        task.next_frame = lambda: next(frames)
+        task.info_set = lambda *_a, **_k: None
+        cls = base_module.BaseBD2Task
+        with mock.patch.object(
+            cls, "capture_method_name", new_callable=mock.PropertyMock, return_value="x"
+        ), mock.patch.object(
+            cls, "executor", new_callable=mock.PropertyMock, return_value=SimpleNamespace()
+        ):
+            task.capture_frame()
+            task.operate(lambda: None)
+            task.capture_frame()
+        self.assertTrue(np.array_equal(scene(self.PAGE), scene_at_press(task)))

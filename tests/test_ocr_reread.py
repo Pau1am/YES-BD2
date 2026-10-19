@@ -117,6 +117,23 @@ class OcrOverrideTest(unittest.TestCase):
         self.assertEqual(self.calls[2]["target_height"], 0)
         self.assertEqual((boxes[0].x, boxes[0].y, boxes[0].width, boxes[0].height), (10, 5, 30, 20))
 
+    def test_a_read_of_only_stray_marks_is_read_again(self):
+        crop = np.zeros((56, 133, 3), np.uint8)
+        stray = _box(1, 2, 3, 4, "4")
+        stray.confidence = 0.77
+        found = [_box(28 + 20, 28 + 10, 60, 40)]
+        with self._ocr([[stray], found]):
+            boxes = self.task.ocr(frame=crop, name="标题")
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual([box.name for box in boxes], ["购买"])
+
+    def test_stray_marks_are_kept_when_the_rereads_find_nothing(self):
+        stray = _box(1, 2, 3, 4, "-")
+        with self._ocr([[stray]]):
+            boxes = self.task.ocr(frame=np.zeros((56, 133, 3), np.uint8), name="t")
+        self.assertEqual(len(self.calls), 4)
+        self.assertEqual(boxes, [stray])
+
     def test_nothing_anywhere_returns_empty_after_three_more_reads(self):
         with self._ocr([]):
             self.assertEqual(self.task.ocr(frame=np.zeros((56, 133, 3), np.uint8), name="t"), [])
@@ -184,8 +201,8 @@ except ImportError:  # pragma: no cover - the tool always ships onnxocr
 class PlayerTitleTest(unittest.TestCase):
     """The player's 跑商 title box (v0.1.21, 2026-10-11, 1080p window at 250%).
 
-    On a fixed-size OCR input (how an NPU reads) the box as cut reads nothing,
-    also enlarged 2× and 3×; with a border it reads 购买.
+    On a fixed-size OCR input (how an NPU reads) the box as cut reads nothing
+    or only a stray mark, also enlarged 2× and 3×; with a border it reads 购买.
     """
 
     def test_the_bordered_read_finds_购买(self):
@@ -203,7 +220,17 @@ class PlayerTitleTest(unittest.TestCase):
         def text(img):
             return " ".join(t for _box, (t, score) in (engine.ocr(img)[0] or []) if score >= 0.2)
 
-        self.assertEqual(text(crop), "")
+        def trusted_text(img):
+            boxes = [
+                SimpleNamespace(name=t, confidence=score)
+                for _box, (t, score) in (engine.ocr(img)[0] or [])
+            ]
+            return " ".join(box.name for box in ocr_reread.trusted(boxes))
+
+        # As cut: nothing (v5) or a stray mark such as 「4」 at 0.77 (v6 on
+        # some runtimes); either way BaseBD2Task.ocr reads it again.
+        self.assertNotIn("购买", text(crop))
+        self.assertEqual(trusted_text(crop), "")
         first = next(ocr_reread.reread_images(crop))
         self.assertEqual(first.scale, 1.0)
         self.assertIn("购买", text(first.image))

@@ -27,9 +27,12 @@ class PoolAmountTest(unittest.TestCase):
 
 
 class ParsersTest(unittest.TestCase):
-    def test_pvp_free_cocktails_never_above_the_pool(self):
+    def test_pvp_free_cocktails_may_run_over_40(self):
         self.assertEqual(12, parse_free_cocktails("12/40"))
-        self.assertIsNone(parse_free_cocktails("70/40"))
+        # Free cocktails can pile up past the daily 40 (player 2026-10-18).
+        self.assertEqual(50, parse_free_cocktails("50/40 +1.47K"))
+        self.assertEqual(70, parse_free_cocktails("70/40"))
+        self.assertIsNone(parse_free_cocktails("50/400"))
 
     def test_pvp_multiplier_range(self):
         self.assertEqual(20, parse_multiplier("20倍"))

@@ -115,3 +115,23 @@ class SmallTextScaleTest(unittest.TestCase):
         task._quick_hunt_ocr_text(frame_4k, (0, 0, 1, 1), "x", small_text=True)
         task._quick_hunt_ocr_text(frame_1080, (0, 0, 1, 1), "x")
         self.assertEqual([2.0, 1.0, 1.0], scales)
+
+
+class ResourceBoxTest(unittest.TestCase):
+    """Player 问题摘要 v0.1.43, 1080p, 2026-10-17: with no stored torches the
+    counter shows only "60/60" at x ~1718–1780 and the old box (to x 1724)
+    read "60" → free count None → every 圣石洞穴 hunt was cancelled."""
+
+    def test_the_box_holds_the_counter_without_stock(self):
+        from src.tasks.quick_hunt import QUICK_HUNT_RESOURCE_ROI
+
+        left, top, right, bottom = QUICK_HUNT_RESOURCE_ROI
+        self.assertLessEqual(left * 1920, 1610)  # "0/60 +2.55K" starts ~1625
+        self.assertGreaterEqual(right * 1920, 1800)
+        self.assertLessEqual(top * 1080, 40)
+        self.assertGreaterEqual(bottom * 1080, 75)
+
+    def test_cut_reads_are_refused_and_whole_reads_pass(self):
+        self.assertIsNone(quick_hunt_free_pool("60"))
+        self.assertIsNone(quick_hunt_free_pool("60/6"))
+        self.assertEqual(60, quick_hunt_free_pool("60/60"))

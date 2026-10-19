@@ -2082,6 +2082,24 @@ class WalkExitRetryTest(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual([(609, 737)], clicks)
 
+    def test_a_covered_label_with_a_known_place_stops_at_the_shorter_wait(self):
+        # 桌面分身 2026-10-18 角色卡3: 5 s of re-reads ended at the known place
+        # anyway; the 5 s wait (patched to 0 above) no longer applies.
+        card = CARD_BY_ID["Q_sp14"]
+        _main, left_corridor, central = card.targets
+        navigator, clicks = self._navigator(
+            ["战斗Ⅱ剑之神殿左侧回廊", "战斗Ⅰ剑之神殿中央回廊"], [""]
+        )
+        reads = []
+        navigator._exit_label_points = lambda _frame, _target: reads.append(1) or []
+
+        with patch("src.tasks.map_trade.navigator_sandbox.WALK_LABEL_KNOWN_READ_TIMEOUT", 0.0):
+            result = navigator._walk_to_collection_map(card, left_corridor, central)
+
+        self.assertTrue(result.success)
+        self.assertEqual(1, len(reads))
+        self.assertEqual([(609, 737)], clicks)
+
 
 class FakeClock:
     def __init__(self):

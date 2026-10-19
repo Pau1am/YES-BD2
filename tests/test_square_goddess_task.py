@@ -902,10 +902,11 @@ if __name__ == "__main__":
 class SquareArrivalWaitTest(unittest.TestCase):
     """Leo 2026-10-15 「我說的10秒是卡死 或者辨識不到」: loading is not stuck."""
 
-    def _run(self, screen_at, prompt_at=None):
+    def _run(self, screen_at, prompt_at=None, before=None):
         from src.utils.wait_limits import STUCK_SECONDS  # noqa: F401
 
         task = object.__new__(SquareGoddessTask)
+        task._scene_at_press = before
         task.config = {}
         task.info_set = lambda *_args, **_kwargs: None
         logs = []
@@ -952,3 +953,24 @@ class SquareArrivalWaitTest(unittest.TestCase):
         arrived, now, _logs = self._run(lambda t: self.BLACK)
         self.assertFalse(arrived)
         self.assertTrue(LOADING_MAX_SECONDS <= now <= LOADING_MAX_SECONDS + 1.0, now)
+
+    def test_the_bright_square_splash_after_the_press_is_loading(self):
+        # 2K clone 2026-10-19: the bright 「FANTASIA SQUARE」 splash (its saved
+        # frame) stood still from the card press until the square ~13 s later.
+        from pathlib import Path
+
+        import cv2
+
+        from src.utils.wait_limits import scene
+
+        splash = cv2.imread(
+            str(Path(__file__).parent / "fixtures" / "goddess" / "square_splash_2k_clone_thumb.jpg")
+        )
+        quick_switch_page = np.full(splash.shape, 40, np.uint8)
+        arrived, now, _logs = self._run(
+            lambda t: splash if t < 13.0 else self.SQUARE,
+            prompt_at=13.0,
+            before=scene(quick_switch_page),
+        )
+        self.assertTrue(arrived)
+        self.assertEqual(13.0, now)
