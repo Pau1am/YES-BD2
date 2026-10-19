@@ -3714,6 +3714,8 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
 
     def test_a_failed_buy_still_sells_from_home(self):
         # Audit #14: a failed 买 or 料理 stopped the day's 120% sale too.
+        # 料理 still runs first: skipping it let 卖 sell the ingredients
+        # uncooked (player, 2026-10-19).
         actions = []
         statuses = {}
         task = self._phase_task(statuses, actions)
@@ -3722,7 +3724,6 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
         )
         phases = (
             ("买", "买", lambda: actions.append("buy") or False),
-            # 料理 cooks what 买 bought today: not without it.
             ("制作料理", "制作料理", lambda: actions.append("cook") or True),
             ("卖", "卖", lambda: actions.append("sell") or True),
         )
@@ -3730,10 +3731,9 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
         self.assertFalse(
             task._run_phases(navigator, phases, after_home=lambda: actions.append("left shop"))
         )
-        self.assertEqual(["buy", "home", "left shop", "sell", "home"], actions)
+        self.assertEqual(["buy", "home", "left shop", "cook", "sell", "home"], actions)
         self.assertEqual("买", statuses["失败"])
-        self.assertEqual("卖", statuses["完成"])
-        self.assertEqual("制作料理", statuses["跳过"])
+        self.assertEqual("制作料理、卖", statuses["完成"])
         self.assertEqual("跑商部分流程未完成。", statuses["状态"])
 
     def test_a_failed_or_broken_cooking_still_sells(self):
@@ -3804,7 +3804,85 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
         self.assertEqual(["买", "制作料理", "卖"], seen["phases"])
         seen["after_home"]()
         self.assertFalse(trader._buy_completed_in_current_shop)
-        self.assertEqual({"制作料理": "买"}, MapTradeTask.phase_needs)
+        self.assertEqual({}, MapTradeTask.phase_needs)
+
+    def test_a_failed_buy_is_tried_once_more_from_home(self):
+        # Leo 2026-10-19 「確保買到」.
+        from src.tasks.map_trade.phase_ledger import PhaseLedger
+
+        with TemporaryDirectory() as folder:
+            buys = iter((False, True))
+            calls = []
+            trader = object.__new__(Trader)
+            trader.run_buy = lambda: calls.append("buy") or next(buys)
+            trader.run_cooking = lambda: calls.append("cook") or True
+            trader.run_sell = lambda: True
+            trader.left_shop = lambda: calls.append("left shop")
+            task = object.__new__(MapTradeTask)
+            task.config = {"启用": True}
+            task.log_info = lambda *_a, **_k: None
+            task.log_warning = lambda *_a, **_k: None
+            task._return_home_after_phases = lambda _navigator: calls.append("home") or True
+            outcomes = {}
+
+            def run_phases(_navigator, phases, after_home=None):
+                for name, _key, action in phases:
+                    outcomes[name] = action()
+                return True
+
+            task._run_phases = run_phases
+            ledger = PhaseLedger(Path(folder) / "phases.json")
+            with (
+                patch("src.tasks.MapTradeTask.Vision"),
+                patch("src.tasks.MapTradeTask.Navigator"),
+                patch("src.tasks.MapTradeTask.ProgressStore"),
+                patch("src.tasks.MapTradeTask.PhaseLedger", return_value=ledger),
+                patch("src.tasks.MapTradeTask.Trader", return_value=trader),
+            ):
+                task.run()
+            self.assertEqual(["buy", "home", "left shop", "buy", "cook"], calls)
+            self.assertTrue(outcomes["买"])
+            self.assertTrue(ledger.done("制作料理"))
+
+    def test_cooking_after_a_failed_buy_is_not_recorded_as_done(self):
+        from src.tasks.map_trade.phase_ledger import PhaseLedger
+
+        with TemporaryDirectory() as folder:
+            ledger = PhaseLedger(Path(folder) / "phases.json")
+            trader = object.__new__(Trader)
+            trader.run_buy = lambda: False
+            trader.run_cooking = lambda: True
+            trader.run_sell = lambda: True
+            trader.left_shop = lambda: None
+            task = object.__new__(MapTradeTask)
+            task.config = {"启用": True}
+            task.log_info = lambda *_a, **_k: None
+            task.log_warning = lambda *_a, **_k: None
+            task._return_home_after_phases = lambda _navigator: True
+            outcomes = {}
+
+            def run_phases(_navigator, phases, after_home=None):
+                for name, _key, action in phases:
+                    outcomes[name] = action()
+                return True
+
+            task._run_phases = run_phases
+            with (
+                patch("src.tasks.MapTradeTask.Vision"),
+                patch("src.tasks.MapTradeTask.Navigator"),
+                patch("src.tasks.MapTradeTask.ProgressStore"),
+                patch("src.tasks.MapTradeTask.PhaseLedger", return_value=ledger),
+                patch("src.tasks.MapTradeTask.Trader", return_value=trader),
+            ):
+                task.run()
+                self.assertTrue(outcomes["制作料理"].success)
+                self.assertFalse(ledger.done("制作料理"))
+                self.assertTrue(ledger.done("卖"))
+                # The retry buys: now 料理 counts.
+                trader.run_buy = lambda: True
+                task.run()
+                self.assertTrue(ledger.done("买"))
+                self.assertTrue(ledger.done("制作料理"))
 
     def test_successful_phases_emit_standalone_completion_notification(self):
         actions = []
@@ -4073,13 +4151,13 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
         trader._wait_for_buy_all_favorites_state = lambda *_a: ((969, 669), frame)
         trader._wait_for_purchase_confirmation = lambda *_a, **_k: False
         trader._purchase_dialog_partly_read = lambda: False
+        trader._sold_out_after_buy = lambda: False
 
         self.assertFalse(trader.buy_all_favorites())
-        # Pressed once more after the first press opened nothing, then stopped.
-        self.assertEqual([((969, 669), frame.shape, 0.3)] * 2, clicks)
+        # Pressed once more after the first press opened nothing, then 确认
+        # at its place; nothing shows 售罄, so the buy failed.
         self.assertEqual(
-            ["买：点了一键购买全部收藏，确认弹窗一直没有出现或读不到，停止购买。"],
-            warnings,
+            [((969, 669), frame.shape, 0.3)] * 2 + [(1045 / 1920, 697 / 1080, 0.8)], clicks
         )
 
     def test_buy_home_confirmation_requires_keyword_votes_brightness_and_ocr(self):

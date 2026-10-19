@@ -3,7 +3,7 @@
     # The version our patched launcher reports. Installed launchers replace
     # themselves only with a higher one (ok's update_pyappify), so bump this
     # whenever the launcher patches below change.
-    [string]$LauncherVersion = "1.2.8",
+    [string]$LauncherVersion = "1.2.9",
     [string]$BuildDir = "pyappify_build",
     [ValidateSet("zlib", "lzma")]
     [string]$NsisCompression = "lzma",
@@ -594,6 +594,273 @@ $appService = Replace-Once $appService `
      "    drop(STARTUP_CHECK.lock().await);`n" +
      "    AUTO_START_CANCELLED.store(true, AtomicOrdering::SeqCst);") `
     "start after the update check"
+
+# The launcher sat a minute or two on 「Fetching all tags」 before the tool
+# opened (player report 2026-10-17, still on v0.1.30 with v0.1.44 out). Every
+# open asked GitHub three times (fetch, tag fetch, tag list), and on Windows
+# libgit2 waits 60 s for each connection that never opens and forever for one
+# that stops sending: the read timeout set above only works with the
+# non-Windows transport. The startup check now asks GitHub once with a short
+# time limit first; when it doesn't answer, the installed version starts right
+# away. When it answers, one fetch brings the branches and tags, the tag list
+# is read from disk, and a fetch still going after 90 s carries on in the
+# background while the installed version starts.
+$gitRs = Replace-Once $gitRs `
+    (@'
+#[tauri::command]
+pub async fn get_tags_and_current_version(
+'@ -replace "`r`n", "`n") `
+    (@'
+/// Whether the update server answers at all within a few seconds; the git
+/// download itself can't be given a time limit on Windows.
+pub async fn update_server_reachable(git_url: &str) -> bool {
+    let url = format!(
+        "{}/info/refs?service=git-upload-pack",
+        git_url.trim_end_matches('/')
+    );
+    let client = match reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(8))
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            warn!("Could not build the update server check, fetching anyway: {}", e);
+            return true;
+        }
+    };
+    // Any answer counts: only a connection that fails or times out means
+    // the git fetch would hang too.
+    match client.get(&url).send().await {
+        Ok(_) => true,
+        Err(e) => {
+            warn!("Update server {} did not answer: {}", git_url, e);
+            false
+        }
+    }
+}
+
+/// The tags and the installed version from the copy on disk, without asking
+/// the update server. Takes no repository lock: an update check past its time
+/// limit may still hold it while the installed version starts.
+pub async fn get_local_tags_and_current_version(
+    repo_path: PathBuf,
+) -> Result<(Vec<String>, String)> {
+    task::spawn_blocking(move || -> Result<(Vec<String>, String)> {
+        let repo = open_repository(&repo_path)?;
+        let sorted_tags = get_sorted_tags_by_time(&repo)?;
+        let head_oid = repo
+            .head()
+            .context("Failed to get repo HEAD")?
+            .target()
+            .context("HEAD has no target OID")?;
+        let mut current_version_tag: Option<String> = None;
+        for tag_name in &sorted_tags {
+            let tag_ref_name = format!("refs/tags/{}", tag_name);
+            if let Ok(reference) = repo.find_reference(&tag_ref_name) {
+                if let Ok(obj) = reference.peel(ObjectType::Commit) {
+                    if obj.id() == head_oid {
+                        current_version_tag = Some(tag_name.clone());
+                        break;
+                    }
+                }
+            }
+        }
+        let current_version = current_version_tag.unwrap_or_else(|| head_oid.to_string());
+        Ok((sorted_tags, current_version))
+    })
+    .await
+    .context("Reading the local tags panicked or was cancelled")?
+}
+
+#[tauri::command]
+pub async fn get_tags_and_current_version(
+'@ -replace "`r`n", "`n") `
+    "read the tags from disk"
+$appService = Replace-Once $appService `
+    (@'
+        if let Err(e) = ensure_repository(&app).await {
+            warn!(
+                "Could not update the repository of '{}', continuing with the local copy: {:?}",
+                app.name, e
+            );
+        }
+        let previous_known_version = app.current_version.clone();
+        let (versions, current) = git::get_tags_and_current_version(&app.name, repo_path).await?;
+'@ -replace "`r`n", "`n") `
+    (@'
+        emit_info!(app.name, "Checking for updates...");
+        let git_url = app.get_current_profile_settings().git_url.clone();
+        if git::update_server_reachable(&git_url).await {
+            // Fetches the branches and the tags; the tag list below reads them
+            // from disk instead of asking GitHub again.
+            let app_for_check = app.clone();
+            let check = tokio::spawn(async move { ensure_repository(&app_for_check).await });
+            match tokio::time::timeout(UPDATE_CHECK_LIMIT, check).await {
+                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Err(e))) => {
+                    warn!(
+                        "Could not update the repository of '{}', continuing with the local copy: {:?}",
+                        app.name, e
+                    );
+                    emit_info!(
+                        app.name,
+                        "Cannot reach the update server; using the installed version."
+                    );
+                }
+                Ok(Err(e)) => warn!("The update check for '{}' stopped: {:?}", app.name, e),
+                Err(_) => {
+                    warn!(
+                        "The update check for '{}' took over {} s; starting with the local copy while it continues.",
+                        app.name,
+                        UPDATE_CHECK_LIMIT.as_secs()
+                    );
+                    emit_info!(
+                        app.name,
+                        "更新检查太久，先用已安装的版本。The update check is taking too long; using the installed version."
+                    );
+                }
+            }
+        } else {
+            emit_info!(
+                app.name,
+                "连不上 GitHub，先用已安装的版本；开加速器后再打开才会更新。Cannot reach GitHub; using the installed version. Turn on an accelerator to get updates."
+            );
+        }
+        let previous_known_version = app.current_version.clone();
+        let (versions, current) = git::get_local_tags_and_current_version(repo_path).await?;
+'@ -replace "`r`n", "`n") `
+    "ask GitHub once with a time limit"
+$appService = Replace-Once $appService `
+    'static AUTO_START_CANCELLED: AtomicBool = AtomicBool::new(false);' `
+    ('static AUTO_START_CANCELLED: AtomicBool = AtomicBool::new(false);' + "`n" +
+     '/// How long the startup update check may take before the installed version is used.' + "`n" +
+     'const UPDATE_CHECK_LIMIT: Duration = Duration::from_secs(90);') `
+    "update check time limit"
+
+# With an accelerator on (Clash and the like set the Windows proxy), the
+# browser reached GitHub but the launcher still sat on 「正在启动应用 ·
+# Attempting to start app」 (player report 2026-10-19, v0.1.44 with v0.2.0
+# out). libgit2 on Windows only looks at git config and the https_proxy
+# variable, never at the proxy Windows is set to, so it went to GitHub
+# directly, and a direct connection that stalls is waited on forever. git now
+# goes through the Windows proxy too, the one the browser and the update
+# server check above already use.
+$gitRs = Replace-Once $gitRs `
+    (@'
+fn create_proxy_options() -> ProxyOptions<'static> {
+    let mut proxy_opts = ProxyOptions::new();
+    proxy_opts.auto();
+    proxy_opts
+}
+'@ -replace "`r`n", "`n") `
+    (@'
+fn create_proxy_options() -> ProxyOptions<'static> {
+    let mut proxy_opts = ProxyOptions::new();
+    // A proxy given in the environment wins, as it did before (auto reads it).
+    let from_env = ["https_proxy", "HTTPS_PROXY"]
+        .iter()
+        .any(|name| std::env::var(name).map_or(false, |value| !value.trim().is_empty()));
+    match if from_env { None } else { windows_proxy_url() } {
+        Some(url) => {
+            info!("git goes through the Windows proxy {}", url);
+            proxy_opts.url(&url);
+        }
+        None => {
+            proxy_opts.auto();
+        }
+    }
+    proxy_opts
+}
+
+/// The proxy for https that Windows is set to (Settings > Network > Proxy),
+/// when it is turned on.
+#[cfg(windows)]
+fn windows_proxy_url() -> Option<String> {
+    use windows_sys::Win32::System::Registry::{
+        RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
+    };
+    fn wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+    let key = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
+    let enable_name = wide("ProxyEnable");
+    let server_name = wide("ProxyServer");
+    let mut enabled: u32 = 0;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            enable_name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            &mut enabled as *mut u32 as *mut core::ffi::c_void,
+            &mut size,
+        )
+    };
+    if status != 0 || enabled == 0 {
+        return None;
+    }
+    let mut server = vec![0u16; 2048];
+    let mut size = (server.len() * 2) as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            server_name.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            server.as_mut_ptr() as *mut core::ffi::c_void,
+            &mut size,
+        )
+    };
+    if status != 0 {
+        warn!("The Windows proxy is on but its address could not be read ({})", status);
+        return None;
+    }
+    let length = server.iter().position(|&c| c == 0).unwrap_or(server.len());
+    proxy_url_from_setting(&String::from_utf16_lossy(&server[..length]))
+}
+
+#[cfg(not(windows))]
+fn windows_proxy_url() -> Option<String> {
+    None
+}
+
+/// Windows writes the proxy as "127.0.0.1:7890" for every protocol, or per
+/// protocol as "http=127.0.0.1:7890;https=127.0.0.1:7890;socks=127.0.0.1:7891".
+/// libgit2 takes an http proxy URL; a SOCKS-only setting gives None.
+fn proxy_url_from_setting(setting: &str) -> Option<String> {
+    let entries: Vec<&str> = setting
+        .split(';')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    let per_protocol = |protocol: &str| {
+        entries.iter().find_map(|entry| {
+            let (name, server) = entry.split_once('=')?;
+            name.trim()
+                .eq_ignore_ascii_case(protocol)
+                .then(|| server.trim())
+        })
+    };
+    let server = if entries.iter().any(|entry| entry.contains('=')) {
+        per_protocol("https").or_else(|| per_protocol("http"))?
+    } else {
+        *entries.first()?
+    };
+    let lower = server.to_ascii_lowercase();
+    if server.is_empty() || lower.starts_with("socks") {
+        None
+    } else if lower.starts_with("http://") || lower.starts_with("https://") {
+        Some(server.to_string())
+    } else {
+        Some(format!("http://{}", server))
+    }
+}
+'@ -replace "`r`n", "`n") `
+    "git goes through the Windows proxy"
 
 # GitHub refuses the launcher log as an attachment because it had no extension
 # (app.2026-10-10, player report 2026-10-10). New logs are app.<date>.txt; the

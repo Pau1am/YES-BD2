@@ -351,7 +351,7 @@ class SaleDateRolloverTest(unittest.TestCase):
 
 
 class BuyConfirmCloseTest(unittest.TestCase):
-    def _trader(self, closed):
+    def _trader(self, closed, sold_out=False):
         import numpy as np
 
         from src.tasks.map_trade.trader_buy import BuyFlowMixin
@@ -371,6 +371,7 @@ class BuyConfirmCloseTest(unittest.TestCase):
         trader._wait_for_purchase_confirmation = lambda *a, **k: True
         results = iter(closed)
         trader._wait_purchase_dialog_closed = lambda: next(results)
+        trader._sold_out_after_buy = lambda: sold_out
         return trader, clicks, warnings
 
     def test_a_swallowed_confirm_is_pressed_once_more(self):
@@ -378,18 +379,24 @@ class BuyConfirmCloseTest(unittest.TestCase):
         self.assertTrue(trader.buy_all_favorites())
         self.assertEqual(2, len(clicks))
 
-    def test_a_dialog_that_stays_fails_the_buy(self):
-        trader, clicks, warnings = self._trader([False, False])
+    def test_a_dialog_that_stays_fails_the_buy_unless_sold_out_shows(self):
+        trader, clicks, _ = self._trader([False, False])
         self.assertFalse(trader.buy_all_favorites())
         self.assertEqual(2, len(clicks))
-        self.assertTrue(warnings)
+        trader, _, _ = self._trader([False, False], sold_out=True)
+        self.assertTrue(trader.buy_all_favorites())
+
+
+def _button_presses(presses):
+    """The read-button presses, without the fixed-place 确认 press."""
+    return [press for press in presses if press[0] != "fixed"]
 
 
 class BuyFirstPressTest(unittest.TestCase):
     """A 一键购买全部收藏 press that opened nothing (a player's 1080p run sat
     10 s on the unchanged shop and the stuck guard stopped it, 2026-10-16)."""
 
-    def _trader(self, confirmations, *, button_again=True, dialog_partly=False):
+    def _trader(self, confirmations, *, button_again=True, dialog_partly=False, sold_out=False):
         import numpy as np
 
         from src.tasks.map_trade.trader_buy import BuyFlowMixin
@@ -397,7 +404,7 @@ class BuyFirstPressTest(unittest.TestCase):
         trader = object.__new__(BuyFlowMixin)
         presses, warnings, waits = [], [], []
         trader.task = SimpleNamespace(
-            operate_click=lambda *a, **k: None,
+            operate_click=lambda x, y, **k: presses.append(("fixed", round(x, 3), round(y, 3))),
             sleep=lambda *a: None,
             log_info=lambda *a, **k: None,
             log_warning=lambda message, **k: warnings.append(message),
@@ -415,36 +422,42 @@ class BuyFirstPressTest(unittest.TestCase):
         trader._wait_for_purchase_confirmation = lambda *a, **k: next(results)
         trader._purchase_dialog_partly_read = lambda: dialog_partly
         trader._wait_purchase_dialog_closed = lambda: True
+        trader._sold_out_after_buy = lambda: sold_out
         return trader, frame, presses, warnings, waits
 
     def test_the_button_read_by_run_buy_is_pressed_without_reading_again(self):
         trader, frame, presses, _, waits = self._trader([True])
         self.assertTrue(trader.buy_all_favorites(located=((1454, 1004), frame)))
         self.assertEqual([], waits)
-        self.assertEqual([(1454, 1004)], presses)
+        self.assertEqual([(1454, 1004)], _button_presses(presses))
 
     def test_a_press_that_opened_nothing_is_pressed_once_more(self):
         trader, frame, presses, warnings, _ = self._trader([False, True])
         self.assertTrue(trader.buy_all_favorites(located=((1454, 1004), frame)))
-        self.assertEqual(2, len(presses))
+        self.assertEqual(2, len(_button_presses(presses)))
         self.assertEqual([], warnings)
 
-    def test_no_dialog_after_two_presses_stops_with_the_reason(self):
-        trader, frame, presses, warnings, _ = self._trader([False, False])
+    def test_no_dialog_after_two_presses_presses_confirm_where_it_sits(self):
+        # Leo 2026-10-19 「買如果沒有成功就點固定位置 確保買到」: 确认 is pressed
+        # at its place and the 售罄 labels decide.
+        trader, frame, presses, _, _ = self._trader([False, False])
         self.assertFalse(trader.buy_all_favorites(located=((1454, 1004), frame)))
-        self.assertEqual(2, len(presses))
-        self.assertIn("确认弹窗", warnings[-1])
+        self.assertEqual([(1454, 1004), (1454, 1004), ("fixed", 0.544, 0.645)], presses)
+        trader, frame, _, _, _ = self._trader([False, False], sold_out=True)
+        self.assertTrue(trader.buy_all_favorites(located=((1454, 1004), frame)))
 
-    def test_no_second_press_when_the_button_is_gone(self):
-        trader, frame, presses, warnings, _ = self._trader([False], button_again=False)
-        self.assertFalse(trader.buy_all_favorites(located=((1454, 1004), frame)))
-        self.assertEqual(1, len(presses))
-        self.assertTrue(warnings)
+    def test_an_unread_button_is_pressed_at_its_fixed_place(self):
+        trader, frame, presses, _, _ = self._trader([False, True], button_again=False)
+        self.assertTrue(trader.buy_all_favorites(located=((1454, 1004), frame)))
+        # Read press, then 一键购买全部收藏's place, then 确认's place.
+        self.assertEqual(
+            [(1454, 1004), ("fixed", 0.747, 0.931), ("fixed", 0.544, 0.645)], presses
+        )
 
     def test_a_slow_dialog_is_waited_for_not_pressed_again(self):
         trader, frame, presses, _, _ = self._trader([False, True], dialog_partly=True)
         self.assertTrue(trader.buy_all_favorites(located=((1454, 1004), frame)))
-        self.assertEqual(1, len(presses))
+        self.assertEqual(1, len(_button_presses(presses)))
 
 
 class SoldOutTest(unittest.TestCase):
