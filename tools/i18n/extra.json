@@ -1528,5 +1528,40 @@
   "en": "Can't get in? See guide",
   "ja": "入れないときはガイドへ",
   "ko": "못 들어가나요? 안내 보기"
+ },
+ "无": {
+  "en": "None",
+  "ja": "なし",
+  "ko": "없음"
+ },
+ "按 {pause} 暂停，可在设置里改": {
+  "en": "Press {pause} to pause (change it in Settings)",
+  "ja": "{pause} で一時停止（設定で変更できます）",
+  "ko": "{pause} 일시정지 (설정에서 바꿀 수 있어요)"
+ },
+ "按 {stop} 停止，可在设置里改": {
+  "en": "Press {stop} to stop (change it in Settings)",
+  "ja": "{stop} で停止（設定で変更できます）",
+  "ko": "{stop} 정지 (설정에서 바꿀 수 있어요)"
+ },
+ "快捷键已关闭，可在设置里改": {
+  "en": "Hotkeys are off (change them in Settings)",
+  "ja": "ショートカットキーはオフです（設定で変更できます）",
+  "ko": "단축키가 꺼져 있어요 (설정에서 바꿀 수 있어요)"
+ },
+ "停止键已关闭，可在首页按「停止」": {
+  "en": "The stop key is off; press \"Stop\" on Home",
+  "ja": "停止キーはオフです。ホームの「停止」を押してください",
+  "ko": "정지 키가 꺼져 있어요. 홈에서 「정지」를 누르세요"
+ },
+ "录制按键是「无」：先选一个键才能录制": {
+  "en": "Record key is set to \"None\": pick a key to record",
+  "ja": "記録キーが「なし」です。記録するにはキーを選んでください",
+  "ko": "기록 키가 「없음」이에요. 기록하려면 키를 고르세요"
+ },
+ "录制按键是「无」：先在设置或「魔兽追踪者」页选一个键才能录制": {
+  "en": "Record key is set to \"None\": pick a key in Settings or on the Fiend Hunter page to record",
+  "ja": "記録キーが「なし」です。設定か「魔獣追跡者」ページでキーを選んでから記録してください",
+  "ko": "기록 키가 「없음」이에요. 설정이나 「마물 추적자」 페이지에서 키를 고른 뒤 기록하세요"
  }
 }

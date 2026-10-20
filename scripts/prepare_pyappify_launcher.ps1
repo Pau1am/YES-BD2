@@ -160,9 +160,149 @@ function Update-InstallerNsiTemplate {
   reinst_done:
 '@
 
+    # Player report 2026-10-20: both installers stopped on 「无法停止正在使用
+    # d:\yes-bd2 中 Python/Qt 文件的进程」 after a blue PowerShell window, and a
+    # restart didn't help. The installer runs without admin rights, but the
+    # launcher asks for admin (uac: true), so an old launcher or tool still
+    # running from the install folder can't be stopped by it; and security
+    # software that blocks PowerShell made the same check fail. Now the check
+    # runs hidden; what is left gets one more try with admin rights (one UAC
+    # prompt); the message names what is still running; and when PowerShell
+    # can't run at all the install carries on (a file that is really in use
+    # still gets NSIS's own retry prompt when it is written).
+    # Leo 2026-10-20: players must never be asked to touch their security
+    # software, and an installer that starts PowerShell with a policy bypass
+    # is exactly what such software flags. Only an earlier install can have
+    # programs running from the folder, so a first install skips the check and
+    # never starts PowerShell.
+    $killFirstInstallSearch = @'
+Function KillInstallDirExecutables
+  ${IfNot} ${FileExists} "$INSTDIR\*.*"
+    Return
+  ${EndIf}
+'@
+    $killFirstInstallReplacement = @'
+Function KillInstallDirExecutables
+  ${IfNot} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+  ${AndIfNot} ${FileExists} "$INSTDIR\data\*.*"
+    Return
+  ${EndIf}
+'@
+    # Player reports 2026-10-19/20: installs to a folder the player picked on
+    # D: or F: stopped on 「无法打开要写入的文件 …\yes-bd2.exe」. The installer has
+    # no admin rights, and some drives only let administrators write. The
+    # folder is now tried when the player leaves the folder page; one that
+    # can't be written keeps them there with a message naming the default
+    # place, instead of failing halfway through the install.
+    $dirWritableSearch = @'
+ascii_check_done:
+  ; If we reach this point, the directory is valid.
+FunctionEnd
+'@
+    $dirWritableReplacement = @'
+ascii_check_done:
+  ; The folder must be writable without admin rights: this installer has none.
+  StrCpy $R5 0
+  ${IfNot} ${FileExists} "$INSTDIR\*.*"
+    StrCpy $R5 1
+  ${EndIf}
+  ClearErrors
+  CreateDirectory "$INSTDIR"
+  FileOpen $R6 "$INSTDIR\yes-bd2-write-test.tmp" w
+  ${If} ${Errors}
+    ${If} $R5 == 1
+      RMDir "$INSTDIR"
+    ${EndIf}
+    ${If} $LANGUAGE == 2052
+      MessageBox MB_OK|MB_ICONEXCLAMATION "这个位置没有写入权限，装不进去：$\r$\n$INSTDIR$\r$\n$\r$\n请换一个位置，例如默认位置：$\r$\n$LOCALAPPDATA\${PRODUCTNAME}"
+    ${Else}
+      MessageBox MB_OK|MB_ICONEXCLAMATION "This folder can't be written to:$\r$\n$INSTDIR$\r$\n$\r$\nPlease choose another one, for example the default:$\r$\n$LOCALAPPDATA\${PRODUCTNAME}"
+    ${EndIf}
+    Abort
+  ${EndIf}
+  FileClose $R6
+  Delete "$INSTDIR\yes-bd2-write-test.tmp"
+  ${If} $R5 == 1
+    RMDir "$INSTDIR"
+  ${EndIf}
+FunctionEnd
+'@
+    $killParamSearch = @'
+  FileWrite $R1 "  [string]$$InstallerPath$\r$\n"
+'@
+    $killParamReplacement = @'
+  FileWrite $R1 "  [string]$$InstallerPath,$\r$\n"
+  FileWrite $R1 "  [string]$$ReportPath$\r$\n"
+'@
+    $killReportSearch = @'
+  FileWrite $R1 "if ($$remaining.Count -gt 0) { exit 2 }$\r$\n"
+'@
+    $killReportReplacement = @'
+  FileWrite $R1 "if ($$remaining.Count -gt 0) {$\r$\n"
+  FileWrite $R1 "  if ($$ReportPath) { (@($$remaining | ForEach-Object { $$_.Name } | Sort-Object -Unique) -join ', ') | Set-Content -LiteralPath $$ReportPath -Encoding ASCII -NoNewline }$\r$\n"
+  FileWrite $R1 "  exit 2$\r$\n"
+  FileWrite $R1 "}$\r$\n"
+'@
+    $killRunSearch = @'
+  retry_kill_install_dir_executables:
+  DetailPrint "Stopping running executables in $INSTDIR"
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$R0" "$INSTDIR" "$EXEPATH"' $R2
+  ${If} $R2 <> 0
+    ${If} $LANGUAGE == 2052
+      MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL "无法停止正在使用 $INSTDIR 中 Python/Qt 文件的进程。$\r$\n请关闭相关应用后点击“重试”。" IDRETRY retry_kill_install_dir_executables
+    ${Else}
+      MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL "Some processes are still using Python/Qt files in $INSTDIR.$\r$\nClose the related app and click Retry." IDRETRY retry_kill_install_dir_executables
+    ${EndIf}
+    Abort
+  ${EndIf}
+FunctionEnd
+'@
+    $killRunReplacement = @'
+  StrCpy $R3 "$PLUGINSDIR\kill-install-dir-executables.txt"
+  retry_kill_install_dir_executables:
+  DetailPrint "Stopping running executables in $INSTDIR"
+  Delete "$R3"
+  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$R0" "$INSTDIR" "$EXEPATH" "$R3"'
+  Pop $R2
+  ${If} $R2 == 2
+    ; What is left most likely runs as administrator (the launcher asks for
+    ; admin) and this installer does not: stop it once more with admin rights.
+    DetailPrint "Some are still running; stopping them as administrator"
+    ExecShellWait "runas" "powershell.exe" '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$R0" "$INSTDIR" "$EXEPATH"' SW_HIDE
+    Delete "$R3"
+    nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$R0" "$INSTDIR" "$EXEPATH" "$R3"'
+    Pop $R2
+  ${EndIf}
+  ${If} $R2 == 2
+    StrCpy $R4 ""
+    ClearErrors
+    FileOpen $R1 "$R3" r
+    ${IfNot} ${Errors}
+      FileRead $R1 $R4
+      FileClose $R1
+    ${EndIf}
+    ${If} $LANGUAGE == 2052
+      MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL "安装位置 $INSTDIR 里还有程序在运行，关不掉：$R4$\r$\n请按 Ctrl+Shift+Esc 打开任务管理器，在「详细信息」里右键结束它们（结束进程树），再点「重试」。" IDRETRY retry_kill_install_dir_executables
+    ${Else}
+      MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL "Programs in $INSTDIR are still running and could not be stopped: $R4$\r$\nEnd them in Task Manager (Details, right-click, End process tree), then click Retry." IDRETRY retry_kill_install_dir_executables
+    ${EndIf}
+    Abort
+  ${ElseIf} $R2 != 0
+    ; PowerShell could not run (blocked by security software, policy, ...):
+    ; don't stop the install over the check itself.
+    DetailPrint "Could not check for running programs ($R2); continuing."
+  ${EndIf}
+FunctionEnd
+'@
+
     $patches = @(
         @{ Description = "dangling uninstaller guard"; Search = $uninstallBranchSearch; Replacement = $uninstallBranchReplacement },
-        @{ Description = "actionable failure message"; Search = $failureMessageSearch; Replacement = $failureMessageReplacement }
+        @{ Description = "actionable failure message"; Search = $failureMessageSearch; Replacement = $failureMessageReplacement },
+        @{ Description = "install folder must be writable"; Search = $dirWritableSearch; Replacement = $dirWritableReplacement },
+        @{ Description = "running-program check: skipped on a first install"; Search = $killFirstInstallSearch; Replacement = $killFirstInstallReplacement },
+        @{ Description = "running-program check: report path"; Search = $killParamSearch; Replacement = $killParamReplacement },
+        @{ Description = "running-program check: name what is left"; Search = $killReportSearch; Replacement = $killReportReplacement },
+        @{ Description = "running-program check: admin retry, hidden, never blocks on PowerShell"; Search = $killRunSearch; Replacement = $killRunReplacement }
     )
 
     foreach ($patch in $patches) {

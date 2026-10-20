@@ -103,13 +103,20 @@ class FiendPageTest(unittest.TestCase):
         page.refresh()
         box = page.key_box
         self.assertEqual(
-            [f"F{n}" for n in range(6, 13)], [box.itemText(i) for i in range(box.count())]
+            ["无", *[f"F{n}" for n in range(6, 13)]],
+            [box.itemText(i) for i in range(box.count())],
         )
         self.assertEqual("F8", box.currentText())
         box.setCurrentText("F9")
         self.assertEqual("F9", self.record.config["录制按键"])
         page.refresh()
         self.assertIn("F9", page.run_note.text())
+        # Leo 2026-10-20: 「无」 is saved as is and recording waits for a key.
+        box.setCurrentText("无")
+        self.assertEqual("无", self.record.config["录制按键"])
+        page.refresh()
+        self.assertIn("无", page.run_note.text())
+        self.assertFalse(page.record_button.isEnabled())
 
     def test_boss_pushing_is_a_switch_left_off(self):
         # Leo 2026-10-06: ticked only for a boss that moves the units.

@@ -58,6 +58,50 @@ class HotkeysTest(unittest.TestCase):
         task = FakeRecordTask()
         self.assertEqual(hotkeys.keys(task), hotkeys.set_key("pause", "F1", task))
 
+    # Leo 2026-10-20: each of the three keys can be 「无」 (off).
+    def test_none_is_a_choice_for_every_key(self):
+        self.assertEqual(("无", *hotkeys.KEY_CHOICES), hotkeys.OPTIONS)
+        task = FakeRecordTask("F8")
+        hotkeys.set_key("pause", "无", task)
+        hotkeys.set_key("stop", "无", task)
+        current = hotkeys.set_key("record", "无", task)
+        self.assertEqual({"pause": "无", "stop": "无", "record": "无"}, current)
+        self.assertEqual(current, hotkeys.keys(task))
+        self.assertEqual("无", task.config["录制按键"])
+
+    def test_none_takes_nobodys_key(self):
+        task = FakeRecordTask("F8")
+        current = hotkeys.set_key("stop", "无", task)
+        self.assertEqual({"pause": "F9", "stop": "无", "record": "F8"}, current)
+
+    def test_picking_a_used_key_while_off_does_not_turn_the_other_off(self):
+        task = FakeRecordTask("F8")
+        hotkeys.set_key("pause", "无", task)
+        current = hotkeys.set_key("pause", "F10", task)
+        self.assertEqual("F10", current["pause"])
+        self.assertNotIn(current["stop"], ("无", "F10", "F8"))
+        self.assertEqual(3, len(set(current.values())))
+
+    def test_existing_players_keep_their_keys(self):
+        self.file.parent.mkdir(parents=True)
+        self.file.write_text('{"pause": "F7", "stop": "F11"}', encoding="utf-8")
+        self.assertEqual(
+            {"pause": "F7", "stop": "F11", "record": "F8"}, hotkeys.keys(FakeRecordTask())
+        )
+
+    def test_hint_names_only_the_keys_that_are_on(self):
+        with patch("src.ui.shell.widgets.t", lambda text: text):
+            both = hotkeys.hint({"pause": "F9", "stop": "F10", "record": "F8"})
+            stop_only = hotkeys.hint({"pause": "无", "stop": "F10", "record": "F8"})
+            off = hotkeys.hint({"pause": "无", "stop": "无", "record": "F8"})
+        self.assertIn("F9", both)
+        self.assertEqual("按 F10 停止，可在设置里改", stop_only)
+        self.assertEqual("快捷键已关闭，可在设置里改", off)
+
+    def test_picker_text_round_trip(self):
+        for key in hotkeys.OPTIONS:
+            self.assertEqual(key, hotkeys.from_display(hotkeys.display(key)))
+
 
 class FakeUser32:
     """RegisterHotKey fails for keys in ``taken``; ``down`` is the keyboard."""
@@ -127,6 +171,18 @@ class TakenKeyTest(unittest.TestCase):
     def test_free_keys_need_no_reading(self):
         user32 = FakeUser32()
         self.listener._bind(user32)
+        self.assertEqual({}, self.listener.watch.keys)
+        self.assertEqual(0, user32.timers)
+
+    def test_a_key_set_to_none_is_neither_registered_nor_read(self):
+        hotkeys.set_key("stop", "无")
+        user32 = FakeUser32(taken={self.f9})
+        self.listener._bind(user32)
+        self.assertEqual({}, user32.registered)
+        self.assertEqual({"pause": self.f9}, self.listener.watch.keys)
+        hotkeys.set_key("pause", "无")
+        self.listener._bind(user32)
+        self.assertEqual({}, user32.registered)
         self.assertEqual({}, self.listener.watch.keys)
         self.assertEqual(0, user32.timers)
 

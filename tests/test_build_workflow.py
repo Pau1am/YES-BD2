@@ -147,6 +147,25 @@ class BuildWorkflowTest(unittest.TestCase):
             "git::get_local_tags_and_current_version(repo_path).await?", script
         )
 
+    def test_installer_running_program_check_never_blocks_on_powershell(self):
+        # Player report 10-20: a first install stopped on 「无法停止正在使用
+        # … Python/Qt 文件的进程」. Only programs really left running may stop
+        # the install, after one try with admin rights.
+        script = (ROOT / "scripts" / "prepare_pyappify_launcher.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("nsExec::ExecToLog 'powershell.exe -NoProfile", script)
+        self.assertIn('ExecShellWait "runas" "powershell.exe"', script)
+        self.assertIn("  ${ElseIf} $R2 != 0", script)
+        self.assertIn('-Encoding ASCII -NoNewline', script)
+        # A first install never starts PowerShell (Leo 10-20: players must
+        # not be asked to touch their security software).
+        self.assertIn('${AndIfNot} ${FileExists} "$INSTDIR\\data\\*.*"', script)
+        # A folder the installer can't write to is caught on the folder page.
+        self.assertIn('FileOpen $R6 "$INSTDIR\\yes-bd2-write-test.tmp" w', script)
+        pyappify = (ROOT / "pyappify.yml").read_text(encoding="utf-8")
+        self.assertIn("show_add_defender: false", pyappify)
+
     def test_launcher_git_uses_the_windows_proxy(self):
         # Player report 10-19: with Clash on, the browser reached GitHub but
         # the launcher hung on 「Attempting to start app」: libgit2 on Windows
