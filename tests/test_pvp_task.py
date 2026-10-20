@@ -2108,13 +2108,28 @@ class PVPTaskHelperTest(unittest.TestCase):
         # The old check searched a box written in 1080p numbers as if they
         # were 1440p ones, so it never saw the F button "!"; this test only
         # mirrored that box and could not catch it (fixed 2026-10-03).
-        task = object.__new__(PVPTask)
-        calls = []
-        task.dismiss_field_followers = lambda **kwargs: calls.append(kwargs) or "dismissed"
+        look = {"appear_seconds": 5.0, "even_if_done_today": True}
+        for outcome, after in (
+            # Leo 2026-10-20: cleared → wait 1.5 s; not cleared (or never
+            # seen) → F once, then 1 s, before the walk to the stage.
+            ("dismissed", [("sleep", 1.5)]),
+            ("absent", [("key", "F", 1.0)]),
+            ("still_visible", [("key", "F", 1.0)]),
+            ("done_today", [("key", "F", 1.0)]),
+        ):
+            with self.subTest(outcome=outcome):
+                task = object.__new__(PVPTask)
+                calls = []
+                task.dismiss_field_followers = (
+                    lambda _o=outcome, **kwargs: calls.append(kwargs) or _o
+                )
+                task.sleep = lambda seconds: calls.append(("sleep", seconds))
+                task.tap_key = lambda key, after_sleep=0.0: calls.append(("key", key, after_sleep))
+                task.log_info = lambda *_a, **_k: None
 
-        PVPTask._clear_pvp_hub_notice_if_present(task)
+                PVPTask._clear_pvp_hub_notice_if_present(task)
 
-        self.assertEqual([{}], calls)
+                self.assertEqual([look, *after], calls)
 
     def test_dismiss_field_followers_presses_f_icon_once_on_real_frame(self):
         from src.utils.field_followers import dismissed_today, reset_dismissed

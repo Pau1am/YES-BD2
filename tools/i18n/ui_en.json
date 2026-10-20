@@ -467,7 +467,18 @@
   "战斗倍数": "Multiplier",
   "倍": "x",
   "场": "battles",
-  "{used} / {free} 杯": "{used} / {free} cups"
+  "{used} / {free} 杯": "{used} / {free} cups",
+  "圣石属性": "Crystal element",
+  "最少": "Lowest",
+  "火把全部打这个属性的圣石洞穴；「最少」是每次自动挑目前最少的属性。": "All torches go to this element's Magic Crystal Cave. \"Lowest\" picks whichever element you have the fewest of each time.",
+  "火把打哪个属性的圣石，现在可以自己选。设定在「任务设定」里。": "You can now choose which Magic Crystal element torches go to. It's under \"Task Setup\".",
+  "默认还是「最少」，自动打目前最少的属性。想固定刷某个属性就点它。": "Still \"Lowest\" by default: the element you have the fewest of. Tap an element to always farm that one.",
+  "技能间隔": "Skill interval",
+  "吸收、召集、压制之间隔几秒再按下一个。电脑或网络较慢、技能常常没按上时调大。": "Seconds to wait between Absorb, Summon and Subdue. Raise it if your PC or network is slow and skills often don't register.",
+  "默认 {s}": "Default {s}",
+  "跑图技能间隔换位置了": "Farming skill interval has moved",
+  "吸收、召集、压制之间隔几秒，现在在「跑图」页就能改。": "The seconds between Absorb, Summon and Subdue can now be changed on the Farming page.",
+  "点这里调整，0.5 到 2 秒。电脑或网络较慢、技能常常没按上时调大。": "Click here to change it, 0.5 to 2 s. Raise it if your PC or network is slow and skills often don't register."
  },
  "not_on_souseha": {
   "小屋": "House",

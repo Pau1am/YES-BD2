@@ -176,20 +176,15 @@ class ProgressTest(unittest.TestCase):
             self.assertTrue(store.can_reserve_action("召集"))
             self.assertTrue(store.can_reserve_action("压制", 80))
             self.assertTrue(store.can_plan_collection(["a", "b", "c"]))
-            self.assertFalse(store.can_plan_collection(["x"] * 22))
 
-    def test_progress_saves_each_submap_and_stops_at_twenty_one(self):
+    def test_progress_saves_each_submap_and_only_the_game_count_ends_the_day(self):
+        # A player 2026-10-20: 18/21 absorbs in the game, but this PC's tally
+        # refused the map (「提交失败：今日技能额度已用尽」) and 开始跑图 did
+        # nothing afterwards.  The tally never refuses a map or ends the day.
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "progress.json"
             store = ProgressStore(path, lambda: datetime(2026, 7, 12, 12, tzinfo=UTC_PLUS_8))
             store.load()
-            # The 22nd absorb would exceed the daily limit; keep its durable
-            # records ready so the limit check, not the readiness check, fires.
-            _seed_action_records(
-                store,
-                COLLECTABLE_CARDS[7].card_id,
-                COLLECTABLE_CARDS[7].targets[0].key,
-            )
             for card in COLLECTABLE_CARDS[:7]:
                 for target in card.targets:
                     _seed_action_records(store, card.card_id, target.key)
@@ -201,18 +196,26 @@ class ProgressTest(unittest.TestCase):
             self.assertEqual(DAILY_ABSORB_LIMIT, store.state.daily_absorbs)
             self.assertEqual(14, store.state.daily_summons)
             self.assertEqual(14, store.state.daily_suppressions)
-            self.assertTrue(store.state.depleted_today)
+            self.assertFalse(store.state.depleted_today)
             self.assertEqual(21, store.state.weekly_submap_count)
             self.assertTrue(
                 all(store.state.card_verified(card.card_id) for card in COLLECTABLE_CARDS[:7])
             )
             next_card = COLLECTABLE_CARDS[7]
-            self.assertFalse(
-                store.mark_target(
-                    next_card.card_id,
-                    next_card.targets[0].key,
-                )
-            )
+            _seed_action_records(store, next_card.card_id, next_card.targets[0].key)
+            self.assertTrue(store.mark_target(next_card.card_id, next_card.targets[0].key))
+            self.assertFalse(store.game_used_up("吸收"))
+
+            store.state.game_counts["吸收"] = (18, 21)
+            store.state.depleted_today = True
+            self.assertTrue(store.can_plan_collection(next_card.targets[1:]))
+            store.forget_unproven_depletion()
+            self.assertFalse(store.state.depleted_today)
+
+            store.state.game_counts["吸收"] = (21, 21)
+            store.state.depleted_today = True
+            self.assertTrue(store.game_used_up("吸收"))
+            store.forget_unproven_depletion()
             self.assertTrue(store.state.depleted_today)
 
     def test_collection_skill_limits_match_three_two_two_per_card(self):
@@ -646,8 +649,26 @@ class ProgressTest(unittest.TestCase):
             store.load()
             store.reconcile_pending("吸收", (20, 24))
             store.reconcile_pending("吸收", (20, 24))
-            self.assertTrue(store.can_plan_collection(["a", "b", "c"]))
-            self.assertFalse(store.can_plan_collection(["a", "b", "c", "d", "e"]))
+            # Leo 2026-10-20 「以遊戲紀錄為主」: a card starts while the game
+            # still shows an 吸收 left; the game's count ends the day.
+            self.assertTrue(store.can_plan_collection(["a", "b", "c", "d", "e"]))
+            store.reconcile_pending("吸收", (24, 24))
+            self.assertFalse(store.can_plan_collection(["a"]))
+            self.assertTrue(store.state.depleted_today)
+
+    def test_the_game_count_is_kept_even_below_this_pcs_tally(self):
+        # Three grey maps passed through raised the tally to 3 while the game
+        # showed 0/21: the next read 1/21 was refused and never stored.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ProgressStore(
+                Path(temp_dir) / "progress.json",
+                lambda: datetime(2026, 8, 10, 12, tzinfo=UTC_PLUS_8),
+            )
+            store.load()
+            store.state.daily_submaps = 3
+            store.reconcile_pending("吸收", (1, 21))
+            self.assertEqual((1, 21), store.state.game_counts["吸收"])
+            self.assertFalse(store.game_used_up("吸收"))
 
     def test_target_commit_covers_reservation_without_double_counting(self):
         with tempfile.TemporaryDirectory() as temp_dir:

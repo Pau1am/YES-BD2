@@ -5,7 +5,6 @@ from unittest.mock import patch
 import numpy as np
 
 from src.tasks.SquareGoddessTask import (
-    GODDESS_ALREADY_COMPLETE,
     GODDESS_NAVIGATION_CLICKED,
     SquareGoddessTask,
 )
@@ -14,7 +13,6 @@ from src.utils.goddess_navigation import (
     NavigationObservation,
     TextBox,
     choose_navigation,
-    is_goddess_completion,
     is_goddess_destination,
     scan_navigation,
 )
@@ -30,22 +28,6 @@ class GoddessNavigationTest(unittest.TestCase):
     def test_destination_wrapped_after_the_first_two_characters(self):
         # Live 2K 2026-10-07: the row broke into "日移动至艾力" | "克史温".
         self.assertTrue(is_goddess_destination("日移动至艾力"))
-
-    def test_completion_requires_exact_goddess_task_and_full_count(self):
-        for text in (
-            "向女神像许愿1/1完成！",
-            "女神像许愿 1／1 完成",
-            "向女神像许愿2/2完成！",
-            "向女神像许愿任务已完成！",
-        ):
-            self.assertTrue(is_goddess_completion(text))
-        for text in (
-            "向女神像许愿0/1",
-            "向女神像许愿进行中",
-            "每日派遣1/1完成！",
-            "创建队伍",
-        ):
-            self.assertFalse(is_goddess_completion(text))
 
     def test_title_anchor_scales_and_prefers_but_does_not_require_icon(self):
         for width, height in ((1920, 1080), (1280, 720)):
@@ -117,48 +99,30 @@ class GoddessNavigationTest(unittest.TestCase):
             )
         self.assertEqual([(990, 310, 1280, 720)], clicks)
 
-    def test_explicit_completion_requires_two_consecutive_observations(self):
+    def _completion_task(self, state, prayer=None, frame=None):
         task = object.__new__(SquareGoddessTask)
         task.sleep = lambda *args: None
-        task.capture_frame = lambda: np.zeros((720, 1280, 3), dtype=np.uint8)
-        sequence = iter([
-            NavigationObservation("absent", "向女神像许愿1/1完成！"),
-            NavigationObservation("absent", "创建队伍"),
-            NavigationObservation("absent", "向女神像许愿1/1完成！"),
-            NavigationObservation("absent", "向女神像许愿2/2完成！"),
-        ])
-        task._observe_goddess_navigation = lambda frame: next(sequence)
-        task._click_client = lambda *args, **kwargs: self.fail("No navigation click")
-        with patch("src.tasks.SquareGoddessTask.monotonic", return_value=0):
-            self.assertEqual(
-                GODDESS_ALREADY_COMPLETE,
-                task._click_goddess_daily_navigation_until(1),
-            )
+        frame = np.full((720, 1280, 3), 120, dtype=np.uint8) if frame is None else frame
+        task.capture_frame = lambda: frame
+        task._observe_goddess_navigation = lambda _frame: NavigationObservation(state, "")
+        task._ocr_pattern_click_point = lambda *args, **kwargs: (prayer, "")
+        return task
 
-    def test_completion_rejects_unknown_blank_or_remaining_task(self):
-        for state in ("unknown", "ready", "ambiguous"):
-            task = object.__new__(SquareGoddessTask)
-            task.sleep = lambda *args: None
-            task.capture_frame = lambda: np.zeros((720, 1280, 3), dtype=np.uint8)
-            task._observe_goddess_navigation = lambda frame: NavigationObservation(state, "")
-            task._ocr_pattern_click_point = lambda *args, **kwargs: (None, "")
-            task._match = lambda *args: None
-            task._passes = lambda *args: True
-            with patch("src.tasks.SquareGoddessTask.monotonic", side_effect=[0, 0, 3]):
-                self.assertFalse(task._wait_for_daily_navigation_to_disappear(2))
+    def test_completion_rejects_remaining_row_prompt_or_dark_screen(self):
+        cases = [("ready", None, None), ("ambiguous", None, None),
+                 ("absent", (100, 100), None),
+                 ("absent", None, np.full((720, 1280, 3), 5, dtype=np.uint8))]
+        for state, prayer, frame in cases:
+            task = self._completion_task(state, prayer, frame)
+            with patch("src.tasks.SquareGoddessTask.monotonic", side_effect=iter(range(20))):
+                self.assertFalse(task._wait_for_daily_navigation_to_disappear(8))
 
-    def test_completion_needs_stable_square_and_absent_prayer_prompt(self):
-        for square, prayer, expected in ((True, None, True), (False, None, False),
-                                         (True, (100, 100), False)):
-            task = object.__new__(SquareGoddessTask)
-            task.sleep = lambda *args: None
-            task.capture_frame = lambda: np.zeros((720, 1280, 3), dtype=np.uint8)
-            task._observe_goddess_navigation = lambda frame: NavigationObservation(
-                "absent", "创建队伍"
-            )
-            task._ocr_pattern_click_point = lambda *args, **kwargs: (prayer, "")
-            task._match = lambda *args: None
-            task._passes = lambda *args: square
-            clock = iter(range(20))
-            with patch("src.tasks.SquareGoddessTask.monotonic", side_effect=clock):
-                self.assertEqual(expected, task._wait_for_daily_navigation_to_disappear(8))
+    def test_completion_after_wish_needs_no_square_bar_or_empty_task_list(self):
+        # Player report 2026-10-20: wished, then the tool stood at the goddess
+        # for minutes and called it unfinished; the row and prompt being gone
+        # is the proof (a 每日奖励 title of other rows reads as "unknown").
+        for state in ("absent", "unknown"):
+            task = self._completion_task(state)
+            task._match = lambda *args: self.fail("square bar is not needed")
+            with patch("src.tasks.SquareGoddessTask.monotonic", side_effect=iter(range(20))):
+                self.assertTrue(task._wait_for_daily_navigation_to_disappear(8))

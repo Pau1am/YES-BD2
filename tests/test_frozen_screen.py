@@ -100,7 +100,7 @@ class LoadingWordsHoldTest(unittest.TestCase):
         self.assertEqual("", loading_words("3rd ANNIVERSARY BROWNDUSTII 棕色尘埃2"))
         self.assertEqual("", loading_words("我的小屋 好友 公会"))
 
-    def test_a_held_screen_waits_up_to_twenty_seconds(self):
+    def test_a_held_screen_waits_up_to_the_loading_cap(self):
         watch = FrozenWatch()
         frame = _screen()
         now = 0.0
@@ -117,7 +117,7 @@ class LoadingWordsHoldTest(unittest.TestCase):
         with self.assertRaises(FrozenScreen) as second:
             watch.look(frame, LOADING_WORDS_SECONDS)
         self.assertEqual(
-            "画面停在「连接中」20 秒没有结束（可能网络或电脑比较慢）", str(second.exception)
+            f"画面停在「连接中」{LOADING_WORDS_SECONDS:.0f} 秒没有结束（可能网络或电脑比较慢）", str(second.exception)
         )
 
     def test_a_new_picture_ends_the_hold(self):

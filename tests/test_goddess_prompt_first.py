@@ -34,6 +34,7 @@ def make_task(prompts, *, navigation=None, wished=False):
     )
     task._ocr_pattern_click_point = lambda frame, *_a, **_k: (frame.point, "")
     task._press_row_where_it_usually_is = lambda: False
+    task._walk_by_key = lambda: False
     return task
 
 
@@ -114,6 +115,48 @@ class BlindRowPressTest(unittest.TestCase):
         task._wished_today = lambda: True
         self.assertTrue(task._pray_at_goddess())
         self.assertEqual([], task.clicks)
+
+
+class RowKeyTest(unittest.TestCase):
+    """Leo 2026-10-20: 「點 E 會走到女神像」 when the daily row is unread."""
+
+    def _task(self, after_key, key_sent=True):
+        task = make_task([None])
+        del task._walk_by_key
+        task.keys = []
+        screens = list(after_key)
+        task.capture_frame = lambda: SimpleNamespace(shape=(1080, 1920, 3))
+
+        def read(_frame, *_a, **_k):
+            if not task.keys:
+                return None, ""
+            return screens.pop(0) if len(screens) > 1 else screens[0]
+
+        task._ocr_pattern_click_point = read
+        task.tap_key = lambda key, after_sleep=0: task.keys.append(key) or key_sent
+        task._press_row_where_it_usually_is = lambda: task.stages.append("blind") or False
+        return task
+
+    def test_e_starts_the_walk_before_the_blind_press(self):
+        task = self._task([(None, "自动移动中：艾力克史温女神像")])
+        self.assertTrue(task._pray_at_goddess())
+        self.assertEqual(["E"], task.keys)
+        self.assertEqual(["pray"], task.stages)
+
+    def test_e_without_a_walk_goes_on_to_the_blind_press(self):
+        task = self._task([(None, "")])
+        with mock.patch.object(goddess_module, "GODDESS_ROW_PRESS_CONFIRM_SECONDS", 0.0):
+            self.assertFalse(task._pray_at_goddess())
+        self.assertEqual(["E"], task.keys)
+        self.assertEqual(["blind"], task.stages)
+
+    def test_a_clicked_row_never_sends_e(self):
+        from src.tasks.SquareGoddessTask import GODDESS_NAVIGATION_CLICKED
+
+        task = self._task([(None, "")])
+        task._click_goddess_daily_navigation_until = lambda **_k: GODDESS_NAVIGATION_CLICKED
+        self.assertTrue(task._pray_at_goddess())
+        self.assertEqual([], task.keys)
 
 
 if __name__ == "__main__":

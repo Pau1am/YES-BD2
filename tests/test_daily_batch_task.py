@@ -92,8 +92,8 @@ class DailyBatchTaskTest(unittest.TestCase):
             "免费抽抽乐",
             "爛装强化分解",
             "每日精炼一次",
-            "广场女神像",
             "自动PVP",
+            "广场女神像",
             "跑商",
             "活动每日战斗",
             # Leo 2026-10-09: the 周常 run in 一键日常, skipped once done this week.

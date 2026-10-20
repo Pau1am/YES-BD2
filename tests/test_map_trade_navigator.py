@@ -559,6 +559,69 @@ class NavigatorTest(unittest.TestCase):
         self.assertEqual([True], opened)
         self.assertIn("无传送阵", result.message)
 
+    def test_map_without_a_circle_is_reached_through_its_walk_neighbour(self):
+        # Leo 2026-10-20: ch14 with 左侧回廊 already done went town -> 中央回廊
+        # by the teleport map (「未识别到传送阵地图传送阵」) and was skipped.
+        for card_id in ("Q_sp14", "Q_sp6", "Q_cp3"):
+            with self.subTest(card=card_id):
+                card = CARD_BY_ID[card_id]
+                main, middle, last = card.targets
+                legs = []
+                navigator = Navigator(SimpleNamespace(), SimpleNamespace())
+                navigator._status = lambda *_args: None
+                navigator._travel_via_nav_menu = lambda *_entries: None
+
+                def teleport(*_args, legs=legs):
+                    legs.append("teleport")
+                    return NavigationResult(False, ScreenState.SANDBOX, "stop")
+
+                navigator._open_teleport_map_anywhere = teleport
+                original = navigator.advance_collection_map
+
+                def advance(cid, current, target, legs=legs, original=original):
+                    if target.key == middle.key:
+                        legs.append(("teleport", current.key, target.key))
+                        return NavigationResult(True, ScreenState.SANDBOX, "")
+                    return original(cid, current, target)
+
+                navigator.advance_collection_map = advance
+                navigator._walk_to_collection_map = lambda _card, here, there, legs=legs: (
+                    legs.append(("walk", here.key, there.key))
+                    or NavigationResult(True, ScreenState.SANDBOX, "")
+                )
+
+                result = navigator.advance_collection_map(card_id, main, last)
+
+                self.assertTrue(result.success)
+                self.assertEqual(
+                    [
+                        ("teleport", main.key, middle.key),
+                        ("walk", middle.key, last.key),
+                    ],
+                    legs,
+                )
+
+    def test_failed_neighbour_leg_names_both_maps(self):
+        card = CARD_BY_ID["Q_sp14"]
+        main, middle, last = card.targets
+        navigator = Navigator(SimpleNamespace(), SimpleNamespace())
+        navigator._status = lambda *_args: None
+        navigator._open_teleport_map_anywhere = lambda *_args: NavigationResult(
+            False, ScreenState.SANDBOX, "无传送阵"
+        )
+        navigator._walk_to_collection_map = lambda *_a: self.fail("walked without arriving")
+
+        result = navigator.advance_collection_map(card.card_id, main, last)
+
+        self.assertFalse(result.success)
+        self.assertIn(middle.title, result.message)
+        self.assertIn(last.title, result.message)
+
+    def test_map_with_a_circle_still_uses_the_teleport_map(self):
+        card = CARD_BY_ID["Q_sp14"]
+        main, middle, _last = card.targets
+        self.assertIsNone(Navigator._walk_neighbour(card, main, middle))
+
     @staticmethod
     def _menu_navigator(reads):
         """A navigator whose ≡ menu OCR returns ``reads`` one after another."""
@@ -654,6 +717,93 @@ class NavigatorTest(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertIn("艾琳", result.message)
+
+    def _circle_page_navigator(self, opens):
+        """Hand always read; ``opens`` answers each wait for the 传送页."""
+        navigator = Navigator(SimpleNamespace(), SimpleNamespace())
+        navigator._status = lambda *_args: None
+        keys, hands, looked = [], [], []
+        navigator.task = SimpleNamespace(
+            tap_key=lambda key, after_sleep=0.0: keys.append(key) or True,
+            log_info=lambda *_a, **_k: None,
+        )
+        navigator.ensure_small_minimap = lambda: True
+        navigator._click_sandbox_teleport_interaction = lambda *a, **k: hands.append(True) or True
+        answers = iter(opens)
+        navigator._wait_for_sandbox_map_open = lambda *a, **k: next(answers)
+        navigator._wait_for_current_sandbox = lambda **_k: looked.append(True) or NavigationResult(
+            True, ScreenState.SANDBOX
+        )
+        return navigator, keys, hands, looked
+
+    def test_circle_page_not_opening_is_opened_again_then_falls_back(self):
+        # Leo 2026-10-20 (v0.2.2, 第8章): on the circle, the hand was pressed
+        # but no teleport page opened, and the card was skipped there.  「應該
+        # 要確保他打開」: the hand once more, then F; the ≡ menu only after.
+        card = CARD_BY_ID["Q_sp8"]
+        missed = NavigationResult(
+            False, ScreenState.UNKNOWN, "传送阵交互按钮后未稳定确认direct_teleport"
+        )
+        navigator, keys, hands, looked = self._circle_page_navigator([missed] * 3)
+        trips = []
+        navigator._travel_to_hunting_ground = lambda: trips.append(True) or "艾琳"
+        navigator.current_collection_target = lambda _card: card.targets[0].key
+
+        result = navigator.prepare_collection_main_area(card.card_id, via_hunting_ground=True)
+
+        self.assertTrue(result.success, result.message)
+        self.assertEqual(2, len(hands))
+        self.assertEqual(["F"], keys)
+        self.assertEqual(3, len(looked))
+        self.assertEqual([True], trips)
+
+    def test_circle_page_opens_on_the_second_hand_press(self):
+        missed = NavigationResult(False, ScreenState.UNKNOWN, "未稳定确认direct_teleport")
+        opened = NavigationResult(
+            True, ScreenState.AREA_MAP, map_page_mode=MapPageMode.DIRECT_TELEPORT
+        )
+        navigator, keys, hands, _looked = self._circle_page_navigator([missed, opened])
+
+        result = navigator.open_teleport_map_from_sandbox()
+
+        self.assertTrue(result.success)
+        self.assertEqual(2, len(hands))
+        self.assertEqual([], keys)
+
+    def test_circle_page_wrong_page_is_closed_before_f(self):
+        wrong = NavigationResult(
+            False,
+            ScreenState.SANDBOX_MAP,
+            "入口与实际地图页面不一致",
+            map_page_mode=MapPageMode.SANDBOX_LARGE_MAP,
+        )
+        opened = NavigationResult(
+            True, ScreenState.AREA_MAP, map_page_mode=MapPageMode.DIRECT_TELEPORT
+        )
+        navigator, keys, hands, _looked = self._circle_page_navigator([wrong, wrong, opened])
+        closed = []
+        navigator._close_confirmed_map_page = lambda modes, **_k: closed.append(modes) or (
+            NavigationResult(True, ScreenState.SANDBOX)
+        )
+
+        result = navigator.open_teleport_map_from_sandbox()
+
+        self.assertTrue(result.success)
+        self.assertEqual([{MapPageMode.SANDBOX_LARGE_MAP}] * 2, closed)
+        self.assertEqual(["F"], keys)
+
+    def test_circle_page_f_is_never_sent_off_the_field(self):
+        missed = NavigationResult(False, ScreenState.UNKNOWN, "未稳定确认direct_teleport")
+        navigator, keys, hands, _looked = self._circle_page_navigator([missed])
+        navigator._wait_for_current_sandbox = lambda **_k: NavigationResult(
+            False, ScreenState.UNKNOWN
+        )
+
+        result = navigator.open_teleport_map_from_sandbox()
+
+        self.assertFalse(result.success)
+        self.assertEqual(1, len(hands))
+        self.assertEqual([], keys)
 
     def test_teleport_map_after_airin_walks_to_the_town_circle(self):
         navigator = Navigator(SimpleNamespace(), SimpleNamespace())

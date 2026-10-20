@@ -129,6 +129,24 @@ class DismissFlowTest(unittest.TestCase):
     def seen(self, center=None):
         return TalkIconSighting(True, 0.99, center or self.CENTER)
 
+    def test_gather_wait_then_press_and_the_f_key_when_the_click_did_nothing(self):
+        # Leo 2026-10-20: wait 5 s in place once the "!" shows, press it, and
+        # press F when the click left it up.
+        keys = []
+        seen = self.seen()
+        frames = [seen] * 7  # 2 + gather, 2 + click, 1 still up, 2 + F key
+        outcome, clicks = self._run(
+            frames, gather_seconds=5.0, press_key=lambda: keys.append("F")
+        )
+        self.assertEqual(FOLLOWERS_DISMISSED, outcome)
+        self.assertEqual([self.CENTER], clicks)
+        self.assertEqual(["F"], keys)
+
+    def test_icon_gone_after_the_gather_wait_is_not_pressed(self):
+        outcome, clicks = self._run([self.seen(), self.seen()], gather_seconds=5.0)
+        self.assertEqual(FOLLOWERS_ABSENT, outcome)
+        self.assertEqual([], clicks)
+
     def test_two_matching_frames_then_press_then_gone(self):
         outcome, clicks = self._run([self.seen(), self.seen()])
         self.assertEqual(FOLLOWERS_DISMISSED, outcome)
