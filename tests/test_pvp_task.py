@@ -3420,6 +3420,61 @@ class PVPTaskHelperTest(unittest.TestCase):
         self.assertTrue(PVPTask._select_setting_multiplier(task, 40))
         self.assertEqual([PVP_MULTIPLIER_40_OPTION_SCREEN_POINT], state["clicks"])
 
+    @staticmethod
+    def _stepping_task(read_value):
+        """The setting dialog as a value moved by the step buttons; reads go
+        through ``read_value(true_value)``."""
+        from src.tasks.PVPTask import PVP_MULTIPLIER_STEP_POINTS
+
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task.sleep = lambda *_args: None
+        state = {"value": 40, "steps": []}
+        moves = {"big_plus": 5, "big_minus": -5, "plus": 1, "minus": -1}
+        by_point = {point: name for name, point in PVP_MULTIPLIER_STEP_POINTS.items()}
+
+        def option(x, y, after_sleep=0.0):
+            state["value"] = 40 if (x, y) == PVP_MULTIPLIER_40_OPTION_SCREEN_POINT else 1
+
+        def step(x, y, after_sleep=0.0):
+            name = by_point[(x, y)]
+            state["steps"].append(name)
+            if state.pop("swallow", False):
+                return
+            state["value"] = max(1, min(40, state["value"] + moves[name]))
+
+        task._click_screen_reference = option
+        task._click_reference = step
+        task._setting_multiplier_matches = lambda value: read_value(state["value"]) == value
+        task._setting_multiplier_value = lambda: read_value(state["value"])
+        return task, state
+
+    def test_select_setting_multiplier_presses_the_known_steps_from_min(self):
+        task, state = self._stepping_task(lambda value: value)
+
+        self.assertTrue(PVPTask._select_setting_multiplier(task, 8))
+        self.assertEqual(8, state["value"])
+        self.assertEqual(["big_plus", "plus", "plus"], state["steps"])
+
+    def test_select_setting_multiplier_steps_on_after_a_swallowed_press(self):
+        task, state = self._stepping_task(lambda value: value)
+        state["swallow"] = True
+
+        self.assertTrue(PVPTask._select_setting_multiplier(task, 8))
+        self.assertEqual(8, state["value"])
+        self.assertEqual(["big_plus", "plus", "plus", "big_plus"], state["steps"])
+
+    def test_select_setting_multiplier_never_turns_back_on_a_misread(self):
+        # A player 2026-10-21: 「一直点右边+1 和-5死循环了」.  Any value above
+        # 1 read 10 too high here, so stepping would go +1, -5, +1, -5 ...
+        task, state = self._stepping_task(lambda value: value if value == 1 else value + 10)
+
+        # Left to 确认, which checks the main popup and 战斗开始.
+        self.assertTrue(PVPTask._select_setting_multiplier(task, 3))
+        self.assertEqual(3, state["value"])
+        self.assertEqual(["plus", "plus"], state["steps"])
+
     def test_select_setting_multiplier_fails_after_retry_budget(self):
         task = object.__new__(PVPTask)
         infos = {}

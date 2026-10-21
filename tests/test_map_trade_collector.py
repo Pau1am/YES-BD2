@@ -491,8 +491,9 @@ class CollectionRunTest(unittest.TestCase):
             events,
         )
 
-    def test_an_unfinished_card_is_reset_and_the_run_goes_on(self):
-        # Leo 2026-10-05: 第6章's badge kept 2 pickups and the run stopped there.
+    def test_an_ordinary_card_is_done_once_its_three_maps_are_done(self):
+        # Leo 2026-10-21 「明明三張圖都有紀錄有吸收 就完成了」: badges read
+        # open after all three maps no longer send the card round again.
         with tempfile.TemporaryDirectory() as temp_dir:
             progress = ProgressStore(
                 Path(temp_dir) / "progress.json",
@@ -548,86 +549,48 @@ class CollectionRunTest(unittest.TestCase):
                 result = collector.run()
 
             self.assertTrue(result.success)
-            # Leo 2026-10-20: an unfinished card is run once more right away.
-            self.assertEqual(["Q_sp1", "Q_sp1", "Q_sp2"], selected)
-            # Leo 2026-10-06: the maps that were done stay recorded.
-            self.assertEqual(3, len(progress.state.completed_targets("Q_sp1")))
-            self.assertFalse(progress.state.card_verified("Q_sp1"))
+            self.assertEqual(["Q_sp1", "Q_sp2"], selected)
+            self.assertTrue(progress.state.card_verified("Q_sp1"))
             self.assertTrue(progress.state.card_verified("Q_sp2"))
-            self.assertIn("Q_sp1", result.message)
-            self.assertTrue(any("其余地图保留记录" in text for text in warnings))
+            self.assertTrue(any("记为本周完成" in text for text in warnings))
+            self.assertNotIn("不再跑", result.message)
             self.assertEqual(0, progress.pending_count())
 
-    def test_only_maps_absorbed_before_the_search_started_are_redone(self):
-        # Leo 2026-10-05: 第6章's badge kept 2 pickups and the run stopped there.
+            selected.clear()
+            with patch("src.tasks.map_trade.collector.COLLECTABLE_CARDS", cards):
+                again = Collector(task, object(), navigator, progress).run()
+            self.assertTrue(again.success)
+            self.assertEqual([], selected)
+
+    def test_old_records_of_three_done_maps_count_as_done_without_entering(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             progress = ProgressStore(
                 Path(temp_dir) / "progress.json",
                 lambda: datetime(2026, 8, 11, 12, tzinfo=UTC_PLUS_8),
             )
             progress.load()
-            cards = (CARD_BY_ID["Q_sp1"], CARD_BY_ID["Q_sp2"])
-            warnings = []
+            cards = (CARD_BY_ID["Q_sp5"], CARD_BY_ID["Q_sp6"])
+            for card in cards:
+                progress.state.cards[card.card_id] = [target.key for target in card.targets]
+            progress.save()
+            checked = []
+            navigator = SimpleNamespace(
+                select_collection_card=lambda card_id, **_kwargs: self.fail("entered"),
+                inspect_collection_card_completion=lambda card_id: (
+                    checked.append(card_id) or self.fail("badges read")
+                ),
+            )
             task = SimpleNamespace(
                 config={"卡带单步重试次数": 1},
                 info_set=lambda *_args: None,
-                log_warning=warnings.append,
+                log_warning=lambda *_args: None,
             )
-            selected = []
-            navigator = SimpleNamespace(
-                select_collection_card=lambda card_id, **_kwargs: (
-                    selected.append(card_id)
-                    or CollectionCardSelectionResult(
-                        CollectionCardSelectionOutcome.ENTERED,
-                        NavigationResult(True, ScreenState.SANDBOX),
-                    )
-                ),
-                current_collection_target=lambda _card: None,
-                prepare_collection_main_area=lambda _card_id, **_kwargs: NavigationResult(
-                    True, ScreenState.SANDBOX
-                ),
-                advance_collection_map=lambda *_args: NavigationResult(True, ScreenState.SANDBOX),
-                open_story_quick_switcher_from_sandbox=lambda **_kwargs: NavigationResult(
-                    True, ScreenState.CARD_MENU
-                ),
-                inspect_collection_card_completion=lambda card_id: NavigationResult(
-                    card_id != "Q_sp1", ScreenState.CARD_MENU, "未同时确认吸取与压制完成"
-                ),
-            )
-            collector = Collector(task, object(), navigator, progress)
-            collector._absorb_used_up = lambda **_kwargs: None
-            # 第12章 town: the first map's 探查 was not seen to start.
-            searches = []
-
-            def ensure_search(**kwargs):
-                searches.append(kwargs)
-                if len(searches) == 1:
-                    return None
-                return SearchCountdownSession((0.1, 0.2, 0.3, 0.4), 80)
-
-            collector._ensure_search = ensure_search
-            collector._verify_search_countdown = lambda _session: True
-
-            def use_actions(actions, *, card_id, map_role):
-                for action in actions:
-                    limit = {"吸收": 21, "召集": 21, "压制": 70}[action.name]
-                    progress.arm_action(card_id, map_role, action.name, baseline=(0, limit))
-                    progress.mark_action_local_done(card_id, map_role, action.name, pending=True)
-                return SkillExecutionResult(
-                    True, pending_actions=tuple(action.name for action in actions)
-                )
-
-            collector._use_actions = use_actions
             with patch("src.tasks.map_trade.collector.COLLECTABLE_CARDS", cards):
-                result = collector.run()
-
+                result = Collector(task, object(), navigator, progress).run()
             self.assertTrue(result.success)
-            # The retry right away redoes the first map, now under 探查.
-            self.assertEqual(["Q_sp1", "Q_sp1", "Q_sp2"], selected)
-            first_map = CARD_BY_ID["Q_sp1"].targets[0].key
-            self.assertIn(first_map, progress.state.completed_targets("Q_sp1"))
-            self.assertTrue(any("之后重做" in text for text in warnings))
-            self.assertEqual(0, progress.pending_count())
+            # 第6章 too (Leo 2026-10-21 「第六章確認跑過一遍就算完成」).
+            for card in cards:
+                self.assertTrue(progress.state.card_verified(card.card_id))
 
     def test_final_map_pending_is_success_warning_and_completed_target_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -3100,6 +3100,27 @@ class TradeMerchantNavigationTest(unittest.TestCase):
             events,
         )
 
+    def test_enter_square_clicks_the_square_card_where_its_picture_is(self):
+        # v0.1.42 summary 2026-10-15: slot 2 of a player's row opened 格鲁菲餐厅.
+        from pathlib import Path
+
+        import cv2
+
+        from src.tasks.map_trade.navigator_trade import SQUARE_ARRIVED
+
+        row = cv2.imread(
+            str(Path(__file__).resolve().parent / "fixtures" / "quick_switch" / "life_gameplay_selected_fhd.png")
+        )
+        swapped = row.copy()
+        swapped[920:1030, 80:220] = row[920:1030, 260:400]
+        swapped[920:1030, 260:400] = row[920:1030, 80:220]
+        navigator, events = self._square_navigator([SQUARE_ARRIVED], recent_is_pvp=True)
+        navigator.vision = SimpleNamespace(capture=lambda: swapped)
+
+        self.assertTrue(navigator._enter_square().success)
+        (_click, point) = events[-1]
+        self.assertAlmostEqual(149 / 1920, point[0], delta=0.01)
+
     def test_enter_square_never_presses_a_pvp_recent_cartridge_and_repeats_a_dropped_card(self):
         from src.tasks.map_trade.navigator_trade import SQUARE_CARD_REPRESSES
         from src.utils.fantasia_square import SQUARE_CARTRIDGE_SLOT_POINT

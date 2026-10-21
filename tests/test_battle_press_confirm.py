@@ -171,6 +171,15 @@ class PvpBattleCountTest(unittest.TestCase):
         # MIN, +1 (to 2), +1 at the cap, the same +1 once more.
         self.assertEqual(4, state["presses"])
 
+    def test_a_misread_count_is_never_stepped_back_down(self):
+        # Counted up from MIN: a read above the target is wrong, and a step
+        # down would loop like the multiplier did (a player 2026-10-21).
+        task, state = self._task()
+        task._battle_count_value = lambda: state["count"] if state["count"] == 1 else 20
+        self.assertEqual(20, PVPTask._set_battle_count(task, 3))
+        # MIN and one +1, nothing pressed down.
+        self.assertEqual(2, state["presses"])
+
 
 class QuickHuntRewardTapTest(unittest.TestCase):
     """The 点击画面即可返回 tap counts once the reward page is gone."""
