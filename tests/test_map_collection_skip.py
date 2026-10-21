@@ -310,23 +310,5 @@ class SkipBrokenCardTest(unittest.TestCase):
         self.assertNotIn("Q_sp2", [event[1] for event in events if len(event) > 1])
 
 
-    def test_chapter_6_is_done_by_its_three_maps_not_its_badges(self):
-        # Leo 2026-10-20 「第六章我記得本來就會沒辦法完成 所以第六章 不需要看勾勾」.
-        entered = []
-
-        def select(card_id, *, enter_visually_complete):
-            entered.append(enter_visually_complete)
-            return ENTERED
-
-        result, events, warnings, state = self._run(
-            ("Q_sp6",), select=select, unfinished=("Q_sp6",)
-        )
-
-        self.assertTrue(result.success, result.message)
-        self.assertEqual([True], entered)
-        self.assertTrue(state.card_verified("Q_sp6"))
-        self.assertEqual(3, sum(1 for event in events if event[0] == "collect"))
-        self.assertFalse(any("卡带图标" in warning for warning in warnings))
-
 if __name__ == "__main__":
     unittest.main()

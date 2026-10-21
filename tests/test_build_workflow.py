@@ -166,6 +166,18 @@ class BuildWorkflowTest(unittest.TestCase):
         pyappify = (ROOT / "pyappify.yml").read_text(encoding="utf-8")
         self.assertIn("show_add_defender: false", pyappify)
 
+    def test_launcher_python_install_retries_a_broken_archive(self):
+        # Player report 10-21: 「Extracting archive …python-3.12.10-amd64.zip
+        # … failed」 with no reason and no try from the other source.
+        script = (ROOT / "scripts" / "prepare_pyappify_launcher.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("let sources = [&primary_url, &backup_url, &primary_url];", script)
+        self.assertIn("check_archive(archive_path)?;", script)
+        self.assertIn("if downloaded != total_size {", script)
+        self.assertIn("python.exe is missing from {} right after unpacking", script)
+        self.assertIn("安装 Python 失败（换下载来源试了 {} 次）。原因：{}", script)
+
     def test_launcher_git_uses_the_windows_proxy(self):
         # Player report 10-19: with Clash on, the browser reached GitHub but
         # the launcher hung on 「Attempting to start app」: libgit2 on Windows

@@ -1563,5 +1563,35 @@
   "en": "Record key is set to \"None\": pick a key in Settings or on the Fiend Hunter page to record",
   "ja": "記録キーが「なし」です。設定か「魔獣追跡者」ページでキーを選んでから記録してください",
   "ko": "기록 키가 「없음」이에요. 설정이나 「마물 추적자」 페이지에서 키를 고른 뒤 기록하세요"
+ },
+ "移到最前面，一键日常先跑它": {
+  "en": "Move to the front: Run All Dailies runs it first",
+  "ja": "先頭へ移動：デイリー一括実行で最初に実行",
+  "ko": "맨 앞으로: 일일 일괄 실행에서 먼저 실행"
+ },
+ "移回最后面，一键日常最后跑它": {
+  "en": "Move back to the end: Run All Dailies runs it last",
+  "ja": "最後に戻す：デイリー一括実行で最後に実行",
+  "ko": "맨 뒤로: 일일 일괄 실행에서 마지막에 실행"
+ },
+ "跑图顺序：最先跑": {
+  "en": "Farming: first",
+  "ja": "周回：最初",
+  "ko": "파밍: 먼저"
+ },
+ "跑图顺序：最后跑": {
+  "en": "Farming: last",
+  "ja": "周回：最後",
+  "ko": "파밍: 마지막"
+ },
+ "每周跑图改成最先跑": {
+  "en": "Weekly Farming now runs first",
+  "ja": "毎週の周回を最初に実行します",
+  "ko": "주간 파밍을 먼저 실행합니다"
+ },
+ "每周跑图改成最后跑": {
+  "en": "Weekly Farming now runs last",
+  "ja": "毎週の周回を最後に実行します",
+  "ko": "주간 파밍을 마지막에 실행합니다"
  }
 }

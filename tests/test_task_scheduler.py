@@ -176,6 +176,7 @@ class TaskScheduleStoreTest(unittest.TestCase):
             "镜中之战",
             "每日跑商",
             "活动每日战斗",
+            "救赎之塔",
             "领取常客圣石",
             "每日精炼一次",
             "爛装强化分解",

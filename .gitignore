@@ -20,6 +20,7 @@ updates/
 update/
 data/
 !src/tasks/fiend_hunt/data/
+!src/tasks/affinity/data/
 data_export/
 data_import/
 click_screenshots/

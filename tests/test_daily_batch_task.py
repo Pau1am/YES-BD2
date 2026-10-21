@@ -9,6 +9,9 @@ from unittest import mock
 from src.config import config
 from src.tasks import run_report, scheduler, weekly_ticks
 from src.tasks.DailyBatchTask import (
+    CLOSE_GAME_FAILED_NOTE,
+    CLOSE_GAME_KEY,
+    CLOSE_GAME_NOTE,
     RUN_MODE_ALL,
     RUN_MODE_INCOMPLETE,
     SHUTDOWN_COUNTDOWN_SECONDS,
@@ -96,6 +99,9 @@ class DailyBatchTaskTest(unittest.TestCase):
             "广场女神像",
             "跑商",
             "活动每日战斗",
+            # Leo 2026-10-21: 恶魔城 救赎之塔 快速战斗.
+            "救赎之塔",
+            "亲密度谈心",
             # Leo 2026-10-09: the 周常 run in 一键日常, skipped once done this week.
             "浏览街机菜单",
             "小屋增加人气",
@@ -1030,6 +1036,53 @@ class DailyBatchTaskTest(unittest.TestCase):
                 ) as shutdown:
                     DailyBatchTask.run(task)
                 shutdown.assert_not_called()
+
+    def _close_game_run(self, switch_on: bool, second_result: bool = True, closed: bool = True):
+        class First:
+            pass
+
+        class Second:
+            pass
+
+        first = _ChildTask("first", [])
+        second = _ChildTask("second", [], result=second_result)
+        specs = (DailyBatchChild("第一项", First), DailyBatchChild("第二项", Second))
+        task, _resets = self.make_task(
+            {First: first, Second: second},
+            specs,
+            {"启用": True, CLOSE_GAME_KEY: switch_on, "第一项": True, "第二项": True},
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            set_default_store(RunHistoryStore(f"{temp_dir}/history.json"))
+            try:
+                with mock.patch(
+                    "src.tasks.DailyBatchTask.game_process.close_game", return_value=closed
+                ) as close, mock.patch.object(run_report, "set_notice") as notice:
+                    DailyBatchTask.run(task)
+            finally:
+                set_default_store(None)
+        return task, close, notice
+
+    def test_close_game_off_by_default(self):
+        batch = DailyBatchTask(executor=SimpleNamespace(scene=None), app=SimpleNamespace())
+        self.assertIs(False, batch.default_config[CLOSE_GAME_KEY])
+        _task, close, _notice = self._close_game_run(switch_on=False)
+        close.assert_not_called()
+
+    def test_close_game_when_all_done_with_no_failure(self):
+        task, close, notice = self._close_game_run(switch_on=True)
+        close.assert_called_once_with()
+        notice.assert_called_once_with(CLOSE_GAME_NOTE)
+        self.assertIn("已关闭游戏", task.info.get("状态"))
+
+    def test_close_game_not_after_a_failure(self):
+        _task, close, _notice = self._close_game_run(switch_on=True, second_result=False)
+        close.assert_not_called()
+
+    def test_close_game_that_will_not_close_is_told(self):
+        _task, close, notice = self._close_game_run(switch_on=True, closed=False)
+        close.assert_called_once_with()
+        notice.assert_called_once_with(CLOSE_GAME_FAILED_NOTE)
 
     def test_shutdown_not_scheduled_when_no_enabled_children(self):
         class First:

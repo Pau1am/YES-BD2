@@ -3,7 +3,7 @@
     # The version our patched launcher reports. Installed launchers replace
     # themselves only with a higher one (ok's update_pyappify), so bump this
     # whenever the launcher patches below change.
-    [string]$LauncherVersion = "1.2.9",
+    [string]$LauncherVersion = "1.2.10",
     [string]$BuildDir = "pyappify_build",
     [ValidateSet("zlib", "lzma")]
     [string]$NsisCompression = "lzma",
@@ -1213,6 +1213,229 @@ $pythonEnvRs = Replace-Once $pythonEnvRs `
             .or_else(|| config.get_effective_pip_index_url());
 '@ -replace "`r`n", "`n") `
     "use the other mirror on the last try"
+
+# Download Python again, from the other source, when the archive can't be
+# unpacked (player report 2026-10-21: 「Extracting archive
+# C:\Temp\python-3.12.10-amd64.zip to D:\yes-bd2\data\apps\yes-bd2\python
+# failed」; both sources' archives are intact, so the copy on that PC was cut
+# off or blocked while being written). The launcher gave up on the first
+# extract failure without trying the backup source, and the message left out
+# why. Now each try downloads to its own file, checks the size and every
+# file's checksum before unpacking, checks python.exe is there afterwards,
+# and on any failure tries again from the other source (3 tries); the last
+# message gives the real reason.
+function Replace-Between([string]$Text, [string]$Start, [string]$End, [string]$Replacement, [string]$What) {
+    $startCount = ([regex]::Matches($Text, [regex]::Escape($Start))).Count
+    $endCount = ([regex]::Matches($Text, [regex]::Escape($End))).Count
+    if ($startCount -ne 1 -or $endCount -ne 1) {
+        throw "Launcher patch '$What' expected exactly 1 start and 1 end match but found $startCount and $endCount; update prepare_pyappify_launcher.ps1."
+    }
+    $startIndex = $Text.IndexOf($Start)
+    $endIndex = $Text.IndexOf($End)
+    if ($endIndex -lt $startIndex) {
+        throw "Launcher patch '$What' found its end before its start; update prepare_pyappify_launcher.ps1."
+    }
+    return $Text.Substring(0, $startIndex) + $Replacement + $Text.Substring($endIndex)
+}
+
+$pythonEnvRs = Replace-Between $pythonEnvRs `
+    (@'
+    let (primary_url, backup_url) = get_download_urls(&version_to_ensure)?;
+'@ -replace "`r`n", "`n") `
+    (@'
+    if !python_exe_path.exists() {
+        error!("CRITICAL:
+'@ -replace "`r`n", "`n").TrimEnd("`n") `
+    (@'
+    let (primary_url, backup_url) = get_download_urls(&version_to_ensure)?;
+    let file_name = get_filename_from_url(&primary_url)?;
+    let sources = [&primary_url, &backup_url, &primary_url];
+    let mut failures: Vec<String> = Vec::new();
+    let mut installed = false;
+    for (attempt, url) in sources.iter().enumerate() {
+        if attempt > 0 {
+            emit_info!(
+                app_name,
+                "Python could not be installed; trying again ({}/{}) from {}",
+                attempt + 1,
+                sources.len(),
+                url
+            );
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+        // Its own file per try: a copy still held open (a scanner, an earlier
+        // try) can't stop the next download.
+        let archive_path = std::env::temp_dir().join(format!(
+            "yes-bd2-{}-{}-{}",
+            std::process::id(),
+            attempt + 1,
+            file_name
+        ));
+        let result =
+            install_python_archive(url, &archive_path, &install_dir, &python_exe_path, app_name)
+                .await;
+        if archive_path.exists() {
+            if let Err(remove_file_err) = fs::remove_file(&archive_path) {
+                warn!(
+                    "Failed to remove archive file {}: {}",
+                    archive_path.display(),
+                    remove_file_err
+                );
+            }
+        }
+        match result {
+            Ok(()) => {
+                installed = true;
+                break;
+            }
+            Err(e) => {
+                error!(
+                    "Installing Python from {} failed (try {}/{}): {:#}",
+                    url,
+                    attempt + 1,
+                    sources.len(),
+                    e
+                );
+                if install_dir.exists() {
+                    if let Err(remove_dir_err) = fs::remove_dir_all(&install_dir) {
+                        warn!(
+                            "Failed to remove extraction directory {}: {}",
+                            install_dir.display(),
+                            remove_dir_err
+                        );
+                    }
+                }
+                let reason = format!("{:#}", e);
+                if !failures.contains(&reason) {
+                    failures.push(reason);
+                }
+            }
+        }
+    }
+    if !installed {
+        let reasons = failures.join(" | ");
+        return Err(anyhow!(
+            "安装 Python 失败（换下载来源试了 {} 次）。原因：{}。请再按一次安装；还是不行，请把 data\\logs 里最新的文件发给我们。Installing Python {} failed {} times: {}",
+            sources.len(),
+            reasons,
+            version_to_ensure,
+            sources.len(),
+            reasons
+        ));
+    }
+    info!(
+        "Successfully installed Python {} to {}",
+        version_to_ensure,
+        install_dir.display()
+    );
+
+'@ -replace "`r`n", "`n") `
+    "install Python again from the other source when unpacking fails"
+$pythonEnvRs = Replace-Once $pythonEnvRs `
+    (@'
+#[cfg(target_os = "windows")]
+fn extract_archive(archive_path: &Path, extract_to_dir: &Path) -> Result<()> {
+'@ -replace "`r`n", "`n") `
+    (@'
+#[cfg(target_os = "windows")]
+async fn install_python_archive(
+    url: &str,
+    archive_path: &Path,
+    install_dir: &Path,
+    python_exe_path: &Path,
+    app_name: &str,
+) -> Result<()> {
+    download_file(url, archive_path, app_name).await?;
+    emit_info!(app_name, "Checking the downloaded Python archive...");
+    check_archive(archive_path)?;
+    fs::create_dir_all(install_dir).with_context(|| {
+        format!("Creating install directory {} failed", install_dir.display())
+    })?;
+    emit_info!(app_name, "Extracting Python...");
+    extract_archive(archive_path, install_dir).with_context(|| {
+        format!(
+            "Extracting archive {} to {} failed",
+            archive_path.display(),
+            install_dir.display()
+        )
+    })?;
+    if !python_exe_path.exists() {
+        return Err(anyhow!(
+            "python.exe is missing from {} right after unpacking (removed or blocked)",
+            install_dir.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Reads every file in a zip archive once, so a broken or cut-off download
+/// is caught (each file's checksum is checked at its end) before anything
+/// is unpacked.
+#[cfg(target_os = "windows")]
+fn check_archive(archive_path: &Path) -> Result<()> {
+    if !archive_path.to_string_lossy().ends_with(".zip") {
+        return Ok(());
+    }
+    let file = fs::File::open(archive_path)
+        .with_context(|| format!("Failed to open {}", archive_path.display()))?;
+    let mut archive = ZipArchive::new(io::BufReader::new(file)).with_context(|| {
+        format!(
+            "The downloaded archive {} is not a readable zip (broken download)",
+            archive_path.display()
+        )
+    })?;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).with_context(|| {
+            format!(
+                "The downloaded archive {} is broken at file {}",
+                archive_path.display(),
+                index
+            )
+        })?;
+        let name = entry.name().to_string();
+        io::copy(&mut entry, &mut io::sink()).with_context(|| {
+            format!(
+                "The downloaded archive {} is broken at {}",
+                archive_path.display(),
+                name
+            )
+        })?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn extract_archive(archive_path: &Path, extract_to_dir: &Path) -> Result<()> {
+'@ -replace "`r`n", "`n") `
+    "check the Python archive before unpacking"
+$pythonEnvRs = Replace-Once $pythonEnvRs `
+    (@'
+                last_reported_percent = percent;
+            }
+        }
+    }
+    Ok(())
+}
+'@ -replace "`r`n", "`n") `
+    (@'
+                last_reported_percent = percent;
+            }
+        }
+    }
+    file.flush()
+        .with_context(|| format!("Failed to write file {}", dest_path.display()))?;
+    if downloaded != total_size {
+        return Err(anyhow!(
+            "Download from {} stopped at {} of {} bytes",
+            url,
+            downloaded,
+            total_size
+        ));
+    }
+    Ok(())
+}
+'@ -replace "`r`n", "`n") `
+    "check the Python download is complete"
 
 Set-Content -LiteralPath $appServicePath -Value $appService -Encoding UTF8
 Set-Content -LiteralPath $pythonEnvRsPath -Value $pythonEnvRs -Encoding UTF8

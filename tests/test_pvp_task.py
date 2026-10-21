@@ -2873,6 +2873,38 @@ class PVPTaskHelperTest(unittest.TestCase):
         )
         self.assertIn((1381, 1061, 2.0), clicks)
 
+    def test_already_on_stage_skips_stage_search(self):
+        # Player v0.2.3 1080p 2026-10-20: the pre-battle screen (BATTLE,
+        # 阵形设置) was already up; the line-up hid the stage, the template
+        # never matched and the run stopped with 「未找到 PVP 舞台物件」.
+        task = object.__new__(PVPTask)
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task._click_template_until = lambda *_a, **_k: self.fail("searched for the stage")
+        task._recover_stage_position = lambda: self.fail("moved the camera")
+        task._save_flow_diagnostic = lambda name: self.fail(name)
+        names = []
+
+        def fake_wait(_patterns, timeout, name, **_kwargs):
+            names.append(name)
+            if name in ("PVP 战前画面", "PVP 自动战斗"):
+                return True, "自动战斗"
+            return False, ""
+
+        task._wait_for_ocr_patterns = fake_wait
+        self.assertTrue(PVPTask._click_pvp_stage_once(task, 10.0))
+        self.assertEqual(["PVP 战前画面"], names)
+
+    def test_stage_search_runs_when_not_on_stage(self):
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        task._wait_for_ocr_patterns = lambda *_a, **_k: (False, "")
+        searched = []
+        task._click_template_until = lambda *a, **k: searched.append(a) or False
+        self.assertFalse(PVPTask._click_pvp_stage_once(task, 10.0))
+        self.assertEqual(1, len(searched))
+
     def test_start_auto_battle_timeout_saves_failure_diagnostic(self):
         task = object.__new__(PVPTask)
         task.config = {}
