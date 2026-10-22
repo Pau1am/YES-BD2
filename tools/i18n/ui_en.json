@@ -520,6 +520,7 @@
   "电脑停在锁屏画面，工具没办法操作游戏，这次没有跑。要让定时启动能跑，Windows 睡醒后不能要求输入密码。": "The PC was at the lock screen, so the tool could not control the game and nothing ran. For Scheduled Start to work, Windows must not ask for a password after waking.",
   "一键日常没能开始（可能有别的任务正在跑），这次没有跑。": "Run All Dailies could not start (another task may be running), so nothing ran.",
   "等了 {m} 分钟，游戏还是没打开或没登录进去，这次没有跑。": "Waited {m} min but the game did not open or log in, so nothing ran.",
+  "等了 {m} 分钟，工具一直在忙（有别的任务在跑），一键日常没能开始，这次没有跑。": "Waited {m} min but the tool stayed busy (another task was running), so Run All Dailies did not start and nothing ran.",
   "网络连不上 Server酱，看看电脑有没有连网": "Can't reach Server酱. Check that the PC is online",
   "SendKey 不对，请重新复制贴上": "The SendKey is wrong. Copy and paste it again",
   "SendKey 格式不对：要贴 SCT 开头的那一串": "That's not a SendKey: paste the string that starts with SCT",
@@ -555,7 +556,11 @@
   "打开右边的开关，照着步骤用微信扫码拿到 SendKey，贴上就好。": "Turn on the switch at the right, follow the steps to get a SendKey by scanning with WeChat, and paste it.",
   "登录卡住了，游戏一直没进到主页，一键日常没有开始跑。请看一下游戏画面": "Login is stuck: the game never reached the home screen, so Run All Dailies did not start. Please check the game screen",
   "可以定时自动跑日常": "Dailies can now run on a schedule",
-  "在首页设定几点，时间到了就自动跑一键完成日常，工具没开也会自己打开。默认关闭，点这张卡片设定。": "Set the times on Home and Run All Dailies starts on its own at those times, opening the tool if it is closed. Off by default; click this card to set it up."
+  "在首页设定几点，时间到了就自动跑一键完成日常，工具没开也会自己打开。默认关闭，点这张卡片设定。": "Set the times on Home and Run All Dailies starts on its own at those times, opening the tool if it is closed. Off by default; click this card to set it up.",
+  "没选星期，这个时段不会跑": "No day picked: this slot will not run",
+  "和另一个时段隔不到 1 小时，请错开": "Less than 1 hour from another slot; move one of them",
+  "电脑完全关机时不会启动；睡眠中可以叫醒": "Does not start while the PC is shut down; a sleeping PC can be woken",
+  "最多 {n} 个时段": "At most {n} time slots"
  },
  "not_on_souseha": {
   "小屋": "House",

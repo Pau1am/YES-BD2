@@ -1593,5 +1593,75 @@
   "en": "Weekly Farming now runs last",
   "ja": "毎週の周回を最後に実行します",
   "ko": "주간 파밍을 마지막에 실행합니다"
+ },
+ "微信通知（跑完通知）": {
+  "en": "WeChat notice (after a run)",
+  "ja": "WeChat 通知（実行後の通知）",
+  "ko": "WeChat 알림 (실행 후 알림)"
+ },
+ "一键完成日常跑完，结果自动发到你自己的微信": {
+  "en": "When Run All Dailies ends, the result goes to your own WeChat",
+  "ja": "「デイリー一括実行」が終わると、結果を自分の WeChat に送ります",
+  "ko": "일일 일괄 실행이 끝나면 결과를 내 WeChat으로 보냅니다"
+ },
+ "打开 Server酱 网站：sct.ftqq.com/sendkey": {
+  "en": "Open the ServerChan site: sct.ftqq.com/sendkey",
+  "ja": "ServerChan のサイトを開く：sct.ftqq.com/sendkey",
+  "ko": "ServerChan 사이트 열기: sct.ftqq.com/sendkey"
+ },
+ "回到工具：左边「设置」→「通知」→「跑完发到微信」，点「设定」": {
+  "en": "Back in the tool: Settings on the left → Notifications → Send results to WeChat, click Setup",
+  "ja": "ツールに戻り、左の「設定」→「通知」→「結果を WeChat に送信」で「設定」を押す",
+  "ko": "도구로 돌아와 왼쪽 「설정」→「알림」→「결과를 WeChat으로 전송」에서 「설정」 누르기"
+ },
+ "贴上 SendKey，按「发测试」": {
+  "en": "Paste the SendKey and press Send test",
+  "ja": "SendKey を貼り付けて「テスト送信」を押す",
+  "ko": "SendKey를 붙여 넣고 「테스트 전송」 누르기"
+ },
+ "微信收到测试后按「完成」，以后每次跑完都会发": {
+  "en": "Once the test reaches WeChat, press Done. Every run sends one from then on",
+  "ja": "WeChat にテストが届いたら「完了」。以後、毎回の実行後に届きます",
+  "ko": "WeChat에 테스트가 오면 「완료」. 이후 실행이 끝날 때마다 보냅니다"
+ },
+ "去设置": {
+  "en": "Go to Settings",
+  "ja": "設定へ",
+  "ko": "설정으로"
+ },
+ "免费版每天 5 则，一天跑一次只用 1 则。只发完成几项、失败原因和用时，不发账号名称。": {
+  "en": "The free plan allows 5 messages a day; one run a day uses 1. Only the count done, failure reasons and time are sent, never account names.",
+  "ja": "無料プランは1日5通、1日1回の実行なら1通だけ。送るのは完了数・失敗理由・所要時間だけで、アカウント名は送りません。",
+  "ko": "무료 플랜은 하루 5건, 하루 한 번 실행하면 1건만 씁니다. 완료 수, 실패 이유, 걸린 시간만 보내고 계정 이름은 보내지 않습니다."
+ },
+ "开始跑日常": {
+  "en": "Run the dailies",
+  "ja": "デイリーを実行する",
+  "ko": "일일 실행하기"
+ },
+ "两种跑法，两个按钮都在「首页」": {
+  "en": "Two ways to run; both buttons are on Home",
+  "ja": "実行方法は2つ、どちらのボタンも「ホーム」にあります",
+  "ko": "실행 방법은 두 가지, 두 버튼 모두 「홈」에 있습니다"
+ },
+ "在游戏里设一次就好": {
+  "en": "Set them once in the game",
+  "ja": "ゲーム内で一度設定すれば OK",
+  "ko": "게임에서 한 번만 설정하면 됩니다"
+ },
+ "微信通知": {
+  "en": "WeChat notice",
+  "ja": "WeChat 通知",
+  "ko": "WeChat 알림"
+ },
+ "跑图设定": {
+  "en": "Farming setup",
+  "ja": "周回の準備",
+  "ko": "파밍 준비"
+ },
+ "跑图前，游戏里先设好这三样（{n}/3）": {
+  "en": "Set these three in the game before farming ({n}/3)",
+  "ja": "周回の前にゲーム内でこの3つを設定（{n}/3）",
+  "ko": "파밍 전에 게임에서 이 세 가지를 설정 ({n}/3)"
  }
 }

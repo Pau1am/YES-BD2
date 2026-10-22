@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from src.ui.traditional import to_traditional
 from src.utils import scheduled_start as ss
-from src.utils.scheduled_start import KIND_RESET, Settings, Slot
+from src.utils.scheduled_start import Settings, Slot
 from tests.ui_fit_audit import problems
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,12 +37,12 @@ def _translator(language: str):
 
 
 def _slots(count: int) -> list[Slot]:
+    # Quarters, an hour or more apart: slots that can be saved.
     slots = [
-        Slot(KIND_RESET),
-        Slot(hour=8, minute=5, days=[5, 6]),
+        Slot(hour=8, minute=15, days=[5, 6]),
         Slot(hour=21, days=[0, 1, 2, 3, 4]),
     ]
-    slots += [Slot(hour=hour, minute=30) for hour in range(9, 12)]
+    slots += [Slot(hour=hour, minute=30) for hour in (10, 12, 14)]
     return slots[:count]
 
 
@@ -128,7 +128,7 @@ class ScheduleDialogFitTest(unittest.TestCase):
         self.assertEqual([], problems(dialog.panel))
 
     def test_a_short_window_scrolls_the_rows_instead_of_squashing(self):
-        dialog = self._open(slots=6, size=(1100, 470))
+        dialog = self._open(slots=5, size=(1100, 420))
         self.assertLessEqual(dialog.panel.height(), 470 - dialog.MARGIN)
         self.assertLess(dialog.scroll.height(), dialog.rows_holder.sizeHint().height())
         self.assertEqual([], problems(dialog.panel))
@@ -137,14 +137,25 @@ class ScheduleDialogFitTest(unittest.TestCase):
 
     def test_times_read_with_two_digits(self):
         dialog = self._open()
-        row = dialog._rows[1]
-        self.assertEqual(("08", "05"), (row.hour.currentText(), row.minute.currentText()))
-        self.assertEqual("00", dialog._rows[2].minute.currentText())
+        row = dialog._rows[0]
+        self.assertEqual(("08", "15"), (row.hour.currentText(), row.minute.currentText()))
+        self.assertEqual("00", dialog._rows[1].minute.currentText())
         self.assertEqual(24, row.hour.count())
-        self.assertEqual(60, row.minute.count())
+        # Quarters only (Leo 2026-10-22 「分鐘改成每15分鐘間隔」).
+        minutes = [row.minute.itemText(i) for i in range(row.minute.count())]
+        self.assertEqual(["00", "15", "30", "45"], minutes)
         row.hour.setCurrentIndex(6)
-        row.minute.setCurrentIndex(45)
+        row.minute.setCurrentIndex(3)
         self.assertEqual((6, 45), (row.slot.hour, row.slot.minute))
+
+    def test_a_marked_row_still_fits(self):
+        dialog = self._open(slots=3)
+        dialog._rows[2].hour.setCurrentIndex(8)  # 08:30 next to 08:15 on Sat/Sun
+        for _ in range(30):
+            self.app.processEvents()
+        self.assertTrue(dialog._rows[2].problem.isVisible())
+        self.assertFalse(dialog.save_button.isEnabled())
+        self.assertEqual([], problems(dialog.panel))
 
 
 class DefaultSlotsTest(unittest.TestCase):

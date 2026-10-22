@@ -24,12 +24,14 @@ class SettingsTest(unittest.TestCase):
     """Leo 2026-10-22: several time slots, each with its own time and days."""
 
     def test_round_trip(self):
-        settings = Settings(True, False, [Slot(KIND_RESET), Slot(KIND_TIME, 7, 5, [5, 6], False)])
+        slots = [Slot(KIND_TIME, 21, 0), Slot(KIND_TIME, 7, 15, [5, 6], False)]
+        settings = Settings(True, False, slots)
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "configs" / "scheduled_start.json"
             ss.save(settings, path)
             again = ss.load(path)
         self.assertEqual(again.to_json(), settings.to_json())
+        self.assertFalse(again.migrated)
 
     def test_missing_or_broken_file_is_off(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -218,7 +220,9 @@ class UiTest(unittest.TestCase):
         )
         patches = [
             mock.patch.object(data, "task_by_name", lambda name: batch),
-            mock.patch.object(schedule_ui, "_settings", Settings(True, True, [Slot(KIND_RESET)])),
+            mock.patch.object(
+                schedule_ui, "_settings", Settings(True, True, [Slot(KIND_TIME, 8, 15)])
+            ),
             mock.patch.object(schedule_ui, "problem", ""),
             mock.patch.object(ss, "save"),
             mock.patch.object(ss, "ensure_wake_timers", return_value=True),
@@ -243,17 +247,40 @@ class UiTest(unittest.TestCase):
     def test_dialog_adds_and_deletes_slots(self):
         dialog = self.ui.ScheduleDialog(None)
         self.addCleanup(dialog.close)
-        self.assertTrue(dialog.add_reset.isHidden())
         dialog._add_time()
         self.assertEqual(len(dialog._rows), 2)
+        # A free time, not a copy (Leo 2026-10-22 「時間不可以衝突吧」).
+        self.assertEqual((21, 0), (dialog.working.slots[1].hour, dialog.working.slots[1].minute))
         dialog._delete(dialog._rows[0])
-        self.assertEqual([s.kind for s in dialog.working.slots], [KIND_TIME])
-        self.assertFalse(dialog.add_reset.isHidden())
+        self.assertEqual([(s.hour, s.minute) for s in dialog.working.slots], [(21, 0)])
         for _ in range(10):
             dialog._add_time()
         self.assertEqual(len(dialog.working.slots), ss.MAX_SLOTS)
+        self.assertEqual(5, ss.MAX_SLOTS)
+        self.assertFalse(dialog.add_time.isEnabled())
+        # Every added slot can be saved as it is.
+        self.assertEqual([""] * 5, ss.slot_problems(dialog.working.slots))
+        self.assertTrue(dialog.save_button.isEnabled())
         # Nothing is kept before 保存.
         self.assertEqual(len(self.ui.settings().slots), 1)
+
+    def test_clashing_rows_are_marked_and_block_saving(self):
+        dialog = self.ui.ScheduleDialog(None)
+        self.addCleanup(dialog.close)
+        dialog._add_time()
+        dialog._rows[1].hour.setCurrentIndex(8)  # 08:00, 15 min from 08:15
+        self.assertTrue(all(row.problem.text() for row in dialog._rows))
+        self.assertFalse(dialog.save_button.isEnabled())
+        dialog._rows[1].hour.setCurrentIndex(10)  # 10:00: more than an hour
+        self.assertEqual(["", ""], [row.problem.text() for row in dialog._rows])
+        self.assertTrue(dialog.save_button.isEnabled())
+        for chip in dialog._rows[1].days:
+            chip.setChecked(False)
+        self.assertIn("星期", dialog._rows[1].problem.text())
+        self.assertFalse(dialog.save_button.isEnabled())
+        # With 定时启动 off the slots do nothing, so it saves.
+        dialog.master.setChecked(False)
+        self.assertTrue(dialog.save_button.isEnabled())
 
     def test_dialog_save_writes_task_and_options(self):
         from src.tasks.DailyBatchTask import CLOSE_GAME_KEY
@@ -282,7 +309,7 @@ class UiTest(unittest.TestCase):
 
     def test_next_text(self):
         now = datetime(2026, 10, 22, 7, 0, tzinfo=TAIPEI)
-        self.assertEqual(self.ui.next_text(now), ("08:05", "下次 · 今天"))
+        self.assertEqual(self.ui.next_text(now), ("08:15", "下次 · 今天"))
         self.ui._settings.enabled = False
         self.assertEqual(self.ui.next_text(now), ("", ""))
 
@@ -399,3 +426,86 @@ class AutorunTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SlotRulesTest(unittest.TestCase):
+    """Leo 2026-10-22: no reset slot, quarters, at most 5, an hour apart."""
+
+    def test_minutes_go_to_their_quarter(self):
+        self.assertEqual([0, 0, 15, 45, 45], [ss.snap_minute(m) for m in (0, 7, 8, 50, 59)])
+        settings = Settings.from_json({"slots": [{"kind": "time", "time": "21:07", "days": [0]}]})
+        self.assertEqual(0, settings.slots[0].minute)
+        self.assertTrue(settings.migrated)
+
+    def test_a_saved_reset_slot_is_dropped(self):
+        settings = Settings.from_json(
+            {
+                "enabled": True,
+                "slots": [
+                    {"kind": "reset", "on": True},
+                    {"kind": "time", "time": "21:00", "days": [0, 1], "on": True},
+                ],
+            }
+        )
+        self.assertEqual([(21, 0)], [(s.hour, s.minute) for s in settings.slots])
+        self.assertTrue(settings.migrated)
+        clean = Settings.from_json(Settings(True, True, [Slot(KIND_TIME, 21, 0, [0, 1])]).to_json())
+        self.assertFalse(clean.migrated)
+
+    def test_at_most_five_are_kept(self):
+        stored = [Slot(KIND_TIME, hour, 0).to_json() for hour in (1, 4, 7, 10, 13, 16)]
+        settings = Settings.from_json({"slots": stored})
+        self.assertEqual(5, len(settings.slots))
+        self.assertTrue(settings.migrated)
+
+    def test_slots_an_hour_apart_or_more(self):
+        monday = Slot(KIND_TIME, 21, 0, [0])
+        self.assertTrue(monday.clashes_with(Slot(KIND_TIME, 21, 0, [0])))
+        self.assertTrue(monday.clashes_with(Slot(KIND_TIME, 21, 45, [0, 3])))
+        self.assertFalse(monday.clashes_with(Slot(KIND_TIME, 22, 0, [0])))
+        self.assertFalse(monday.clashes_with(Slot(KIND_TIME, 21, 0, [1])))
+        self.assertFalse(monday.clashes_with(Slot(KIND_TIME, 21, 0, [0], on=False)))
+        # Over midnight: Monday 23:30 and Tuesday 00:15; Sunday 23:45 and Monday 00:30.
+        self.assertTrue(Slot(KIND_TIME, 23, 30, [0]).clashes_with(Slot(KIND_TIME, 0, 15, [1])))
+        self.assertTrue(Slot(KIND_TIME, 23, 45, [6]).clashes_with(Slot(KIND_TIME, 0, 30, [0])))
+
+    def test_problems_name_the_slot(self):
+        slots = [
+            Slot(KIND_TIME, 9, 0, []),
+            Slot(KIND_TIME, 21, 0),
+            Slot(KIND_TIME, 21, 30),
+            Slot(KIND_TIME, 7, 0),
+        ]
+        found = ss.slot_problems(slots)
+        self.assertIn("星期", found[0])
+        self.assertIn("1 小时", found[1])
+        self.assertIn("1 小时", found[2])
+        self.assertEqual("", found[3])
+
+    def test_a_new_slot_gets_a_free_hour(self):
+        self.assertEqual((21, 0), ss.free_time([]))
+        self.assertEqual((22, 0), ss.free_time([Slot(KIND_TIME, 21, 0)]))
+        # 22:00 and 23:00 are under an hour from 21:00 / 22:15.
+        self.assertEqual((0, 0), ss.free_time([Slot(KIND_TIME, 21, 0), Slot(KIND_TIME, 22, 15)]))
+        # Taken only on Monday still leaves no room on Monday for an everyday slot.
+        self.assertEqual((22, 0), ss.free_time([Slot(KIND_TIME, 21, 0, [0])]))
+
+    def test_old_settings_are_written_again_when_the_tool_opens(self):
+        from PySide6.QtWidgets import QApplication
+
+        from src.ui.shell import schedule_ui
+
+        QApplication.instance() or QApplication([])
+        old = Settings.from_json({"enabled": True, "slots": [{"kind": "reset", "on": True}]})
+        with (
+            mock.patch.object(schedule_ui, "_settings", old),
+            mock.patch.object(schedule_ui, "store", return_value="") as store,
+        ):
+            schedule_ui.start_watch(None)
+        self.assertEqual([], store.call_args[0][0].slots)
+        with (
+            mock.patch.object(schedule_ui, "_settings", Settings()),
+            mock.patch.object(schedule_ui, "store") as store,
+        ):
+            schedule_ui.start_watch(None)
+        store.assert_not_called()

@@ -22,9 +22,11 @@ SOURCE = Path(guide_page.__file__).read_text(encoding="utf-8")
 class _Item:
     def __init__(self):
         self.badge = ""
+        self.kind = ""
 
     def set_badge(self, text, kind=""):
         self.badge = text
+        self.kind = kind
 
 
 class GuidePageTest(unittest.TestCase):
@@ -42,8 +44,37 @@ class GuidePageTest(unittest.TestCase):
 
     def test_sidebar_lists_the_guide_above_settings(self):
         keys = [key for key, _label, _icon in Sidebar.BOTTOM]
-        # Leo 2026-10-14: 桌面分身 has its own guide page under 使用说明.
-        self.assertEqual(["problem", "guide", "clone", "settings", "about"], keys)
+        # Leo 2026-10-14: 桌面分身 has its own guide page under 使用说明;
+        # 2026-10-22: 使用说明 first of these.
+        self.assertEqual(["guide", "problem", "clone", "settings", "about"], keys)
+
+    def test_guide_is_grouped_in_cards_wechat_first(self):
+        # Leo 2026-10-22: cards by topic, the 微信通知 steps on top.
+        page = GuidePage()
+        cards = page.slides.cards
+        self.assertEqual(5, len(cards))
+        self.assertIn("微信通知", cards[0].title.text())
+        self.assertEqual(["wechat", "start", "map", "map", "map"], page._topic_of)
+        page.close()
+
+    def test_cards_turn_left_and_right_without_scrolling(self):
+        # Leo 2026-10-22 「不要下拉 每個卡片左右切」.
+        page = GuidePage()
+        page.resize(1000, 760)
+        page.show()
+        self.app.processEvents()
+        self.assertEqual(0, page.verticalScrollBar().maximum())
+        self.assertFalse(page.back.isEnabled())
+        page.go(1)
+        self.assertEqual(1, page.slides.index)
+        self.assertEqual("start", page.tabs.value())
+        page._show_topic("map")
+        self.assertEqual(2, page.slides.index)
+        page.show_card(99)
+        self.assertEqual(4, page.slides.index)
+        self.assertFalse(page.next.isEnabled())
+        self.assertEqual("5 / 5", page.count.text())
+        page.close()
 
     def test_every_picture_exists_and_loads(self):
         for name in PICTURES:
@@ -57,6 +88,8 @@ class GuidePageTest(unittest.TestCase):
         navigated = []
         page = GuidePage(navigated.append, sidebar)
         self.assertEqual("必看", sidebar.items["guide"].badge)
+        # Leo 2026-10-22: in the soft rose, not the plain grey chip.
+        self.assertEqual("must", sidebar.items["guide"].kind)
         page.show()
         self.app.processEvents()
         self.assertEqual("必看", sidebar.items["guide"].badge)

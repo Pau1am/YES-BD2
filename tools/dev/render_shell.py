@@ -7,6 +7,10 @@ PNGs, in light and dark (layout check across languages and Windows scaling).
 for Windows' 125 % / 150 % / 200 %.  Writes configs/ui_config.json (ignored by
 git) with the language before the app starts; run it from the repo root.
 Files: <out dir>/<theme>-<page>.png, then the dialogs as <theme>-dlg-<name>.png.
+Each dialog is also driven the way a player would (add a row, show a message)
+and drawn again as <theme>-dlg-<name>-<step>.png.  fit.jsonl lists what
+tests/ui_fit_audit.problems() finds after each one, with only events
+processed: nothing here places or resizes a window by hand.
 """
 
 import json
@@ -18,6 +22,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("WINDIR", "/nonexistent-windir")  # ok-script looks for Windows fonts
 root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, root)
+sys.path.insert(0, os.path.join(root, "tests"))
 os.chdir(root)
 
 out = os.path.abspath(sys.argv[1])
@@ -128,7 +133,21 @@ def audit(root: QWidget, name: str) -> None:
             file.write(json.dumps({"screen": name, **problem}, ensure_ascii=False) + "\n")
 
 
+def fit(root: QWidget, name: str) -> None:
+    """tests/ui_fit_audit.problems() for what the player sees right now."""
+    from ui_fit_audit import problems
+
+    found = problems(root)
+    with open(os.path.join(out, "fit.jsonl"), "a", encoding="utf-8") as file:
+        for problem in found:
+            file.write(json.dumps({"screen": name, "problem": problem}, ensure_ascii=False) + "\n")
+    print("fit", name, len(found), flush=True)
+
+
 _label = ["dialog"]
+# What the player does inside a dialog once it is open: (step, do it) pairs
+# per dialog name, set by dialogs() below.
+_steps: dict[str, list] = {}
 
 
 def _composite(window, dialog) -> "QPixmap":
@@ -152,7 +171,19 @@ def _fake_exec(dialog, *_args):
     window = dialog.parentWidget().window() if dialog.parentWidget() else dialog
     _composite(window, dialog).save(os.path.join(out, _label[0] + ".png"))
     audit(dialog, _label[0])
+    fit(dialog, _label[0])
     print("saved", _label[0], flush=True)
+    for step, do in _steps.get(_label[0].split("-dlg-", 1)[-1], []):
+        try:
+            do(dialog)
+        except Exception:
+            traceback.print_exc()
+            continue
+        wait(300)
+        settle()
+        name = f"{_label[0]}-{step}"
+        _composite(window, dialog).save(os.path.join(out, name + ".png"))
+        fit(dialog, name)
     dialog.hide()
     return 0
 
@@ -187,19 +218,83 @@ def dialogs(shell):
 
         return open_it
 
+    from src.ui.shell import run_notify_dialog, schedule_ui
+    from src.ui.shell.widgets import shell_buttons
+    from src.utils import accounts
+
+    def five_accounts():
+        # The menu's 新增账号 adds one and opens this list: the most rows.
+        while len(accounts.accounts()) < accounts.MAX_ACCOUNTS:
+            accounts.add(data.tr("很长很长的账号名字二十个字"))
+        return accounts_ui.ManageDialog(window).exec()
+
+    def last_row(dialog):
+        return dialog.rows.itemAt(dialog.rows.count() - 1).widget()
+
+    def set_message(dialog, text):
+        # What 保存 does when Windows refuses the task, minus Windows.
+        dialog.message.set_text(text)
+        dialog.message.show()
+
+    def message():
+        box = MessageBox(data.tr("游戏还没开"), data.tr("要帮你打开游戏并开始跑吗？"), window)
+        shell_buttons(box)
+        return box.exec()
+
+    def fiend_error(box):
+        from qfluentwidgets import CaptionLabel
+
+        box.findChildren(CaptionLabel)[0].setText(data.tr('名字不能空白，也不能有 \\ / : * ? " < > |'))
+
+    _steps.clear()
+    _steps.update({
+        "accounts-5": [
+            ("picture-error", lambda d: d.say("看不懂这张图片，换一张 PNG 或 JPG 试试")),
+            ("delete-ask", lambda d: last_row(d)._delete()),
+            ("deleted", lambda d: last_row(d)._delete()),
+            ("error-gone", lambda d: d.say("")),
+        ],
+        "schedule": [
+            *[(f"add-{n}", lambda d: d._add_time()) for n in range(1, 7)],
+            ("add-reset", lambda d: d._add_reset()),
+            ("save-error", lambda d: set_message(d, "Windows 不让建立定时：请重新打开 YES-BD2 再试，还是不行就重开电脑")),
+            ("delete", lambda d: d._delete(d._rows[-1])),
+            ("off", lambda d: d.master.setChecked(False)),
+        ],
+        "run-notify": [
+            ("bad-key", lambda d: d.edit.setText("abc")),
+            ("good-key", lambda d: d.edit.setText("SCT1234567890abcdef")),
+            ("sending", lambda d: d._say(run_notify_dialog.SENDING)),
+            ("test-failed", lambda d: d._show_test("发不出去：连不上 Server酱，看看网络，或者过几分钟再试")),
+        ],
+        "run-confirm": [
+            ("other-mode", lambda d: d._set_mode([m for m in (run_confirm.MODE_LEFT, run_confirm.MODE_TICKED) if m != d.mode][0])),
+            ("none", lambda d: d._select_all(False)),
+            ("all", lambda d: d._select_all(True)),
+        ],
+        "skill-interval": [
+            ("max", lambda d: d.slider.setValue(d.slider.maximum())),
+            ("min", lambda d: d.slider.setValue(d.slider.minimum())),
+        ],
+        "fiend-new-save": [("error", fiend_error)],
+    })
+
     items = [
         ("game-not-open", lambda: actions._ask_to_open_game(window)),
         ("run-confirm", lambda: run_confirm.ask(window, batch)),
         ("run-confirm-clone", lambda: run_confirm.ask(window, batch, clone=True)),
         ("skill-interval", lambda: skill_interval_dialog.ask(window, 1.0, (0.3, 5.0), 1.0)),
         ("accounts", lambda: accounts_ui.ManageDialog(window).exec()),
+        ("accounts-5", five_accounts),
+        ("schedule", lambda: schedule_ui.ScheduleDialog(window).exec()),
+        ("run-notify", lambda: run_notify_dialog.ask(window)),
         ("account-mismatch", lambda: accounts_ui.MismatchDialog(window).exec()),
         ("clone-ask", lambda: clone_flow.ask_and_start(window, batch)),
         ("language-relaunch", lambda: shell.pages["settings"]._offer_relaunch()),
         ("clone-undo", lambda: shell.pages["settings"]._clone_undo()),
         ("fiend-new-save", lambda: shell.pages["fiend"].new_save()),
         ("bargain", lambda: shell.pages["trade"]._bargain_dialog(data.task_by_class_name("BargainLoopTask"))[0].exec()),
-        ("message", lambda: MessageBox(data.tr("游戏还没开"), data.tr("要帮你打开游戏并开始跑吗？"), window).exec()),
+        ("message", message),
     ]
     items += [(f"tour-{name}", tour(steps)) for name, steps in tours()]
     return items
@@ -221,6 +316,7 @@ def shoot(window):
                 settle()
                 save(window, f"{mode}-{key}")
                 audit(page, f"{mode}-{key}")
+                fit(window, f"{mode}-{key}")
                 view = getattr(page, "view", None)
                 if view is not None and view.height() > page.viewport().height() + 4:
                     save(view, f"{mode}-{key}-full")
@@ -239,6 +335,7 @@ def shoot(window):
                         settle()
                         save(window, f"{_label[0]}-{step + 1}")
                         audit(overlay, f"{_label[0]}-{step + 1}")
+                        fit(overlay, f"{_label[0]}-{step + 1}")
                         overlay.go(1)
                     overlay.hide()
                     overlay.deleteLater()
