@@ -129,6 +129,7 @@ from src.tasks.map_trade.trader_constants import (
     SELL_MODE_POINT,
     SHOP_MODE_TITLE_REGION,
 )
+from src.tasks.map_trade.navigator_trade import MERCHANT_BACK_LOOK_SECONDS
 from src.tasks.map_trade.vision import Vision
 from src.tasks.MapTradeTask import MapTradeTask
 from src.utils.calibration import FHD_1080, reference_rect_to_relative_roi
@@ -4986,7 +4987,8 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
         with patch("src.tasks.map_trade.navigator_trade.monotonic", lambda: clock[0]):
             navigator._return_home_pass()
         self.assertEqual([("popup", SALE_CLOSE_POINT), ("shop",)], actions)
-        self.assertEqual(2 * SALE_OCR_INTERVAL, clock[0])
+        # The sale popup's two looks, then the merchant menu looked for.
+        self.assertAlmostEqual(2 * SALE_OCR_INTERVAL + MERCHANT_BACK_LOOK_SECONDS, clock[0], places=6)
 
     def test_return_home_stops_if_sale_popup_close_is_unconfirmed(self):
         for after_click in ("姜黄 拥有54个 可购买54个 出售", ""):

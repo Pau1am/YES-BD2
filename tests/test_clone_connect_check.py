@@ -165,6 +165,8 @@ class AskAndStartTest(unittest.TestCase):
             mock.patch.object(clone_desktop, "turn_off_hello_only", return_value=True),
             mock.patch.object(clone_flow, "open_clone", return_value=True) as open_clone,
             mock.patch.object(clone_flow, "message") as message,
+            # The stand-in box has no real buttons to restyle.
+            mock.patch.object(clone_flow, "shell_buttons"),
         ):
             started = clone_flow.ask_and_start(object(), object())
         return started, _Box.shown[-1], enable, open_clone, message

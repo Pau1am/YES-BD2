@@ -54,6 +54,9 @@ class GridBadgeTest(unittest.TestCase):
     def test_the_15_armour_is_kept_even_when_the_ocr_read_nothing(self):
         frame = _frame("grid_sr_badges_leo_4k_at_1080.jpg", GRID_AT)
         self.assertEqual("已强化", JunkGearTask._older_cell_kept(frame, (0, 1), set()))
+        # A new item (「!」) is never enhanced: its badge spot is not read
+        # (live 2K 2026-10-22, a new R kept as 已强化).
+        self.assertEqual("", JunkGearTask._older_cell_kept(frame, (0, 1), set(), fresh=True))
 
 
 class PopupLevelTest(unittest.TestCase):

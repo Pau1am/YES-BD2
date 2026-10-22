@@ -41,6 +41,10 @@ class LoadingPercentTest(unittest.TestCase):
 
 
 class WaitAsksBeforeStuckTest(unittest.TestCase):
+    def setUp(self):
+        # A task from another test may have left its popup closer behind.
+        wait_limits.set_popup_closer(None)
+
     def tearDown(self):
         wait_limits.set_loading_reader(None)
 

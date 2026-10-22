@@ -317,6 +317,93 @@ class FilterSetTest(unittest.TestCase):
                 self.assertIsNone(BagFilterMixin._saved_filter())
 
 
+class SortMenuOverFilterButton(FakeMenu):
+    """A sort menu left open lies over the 筛选 button (a player's v0.2.4
+    run, 2026-10-21): taps there do not reach the button."""
+
+    def __init__(self):
+        super().__init__()
+        self.sort_open = True
+
+    def _click_reference(self, x, y, after_sleep=0.0):
+        from src.tasks.bag_filter import FILTER_BUTTON_POINT
+
+        if self.sort_open and (x, y) == FILTER_BUTTON_POINT:
+            self.clicks.append((x, y))
+            return
+        super()._click_reference(x, y, after_sleep)
+
+    def _close_covering_menu(self):
+        self.sort_open = False
+
+
+class CoveredFilterButtonTest(unittest.TestCase):
+    def setUp(self):
+        wait = mock.patch("src.tasks.bag_filter.FILTER_WAIT_SECONDS", 0.0)
+        wait.start()
+        self.addCleanup(wait.stop)
+
+    def test_a_sort_menu_left_open_is_closed_and_the_filter_set(self):
+        menu = SortMenuOverFilterButton()
+        self.assertTrue(menu._set_bag_filter({"grade": "R", "worn": False}))
+        self.assertFalse(menu.sort_open)
+        self.assertEqual({"grade": "R", "worn": False}, menu.state)
+
+
+class SortMenuCloseTest(unittest.TestCase):
+    """Closing the sort menu is checked, not a single blind tap."""
+
+    def _task(self, closes_on):
+        from src.tasks.JunkGearTask import JunkGearTask
+
+        task = object.__new__(JunkGearTask)
+        task.sleep = lambda *_a: None
+        task.log_info = lambda *_a, **_k: None
+        task.clicks = []
+        task.menu_open = True
+
+        def click(x, y, after_sleep=0.0):
+            task.clicks.append((x, y))
+            if len(task.clicks) in closes_on:
+                task.menu_open = False
+
+        task._click_reference = click
+        task._sort_menu_boxes = lambda: (
+            [SimpleNamespace(name="按获得时间从晚到早排序")] if task.menu_open else []
+        )
+        wait = mock.patch("src.tasks.JunkGearTask.SORT_MENU_WAIT_SECONDS", 0.0)
+        wait.start()
+        self.addCleanup(wait.stop)
+        return task
+
+    def test_one_tap_that_closes_it(self):
+        from src.tasks.JunkGearTask import SORT_MENU_CLOSE_POINT
+
+        task = self._task(closes_on={1})
+        self.assertTrue(task._close_sort_menu())
+        self.assertEqual([SORT_MENU_CLOSE_POINT], task.clicks)
+
+    def test_a_lost_tap_is_tapped_again(self):
+        from src.tasks.JunkGearTask import SORT_MENU_CLOSE_POINT
+
+        task = self._task(closes_on={2})
+        self.assertTrue(task._close_sort_menu())
+        self.assertEqual([SORT_MENU_CLOSE_POINT] * 2, task.clicks)
+
+    def test_the_sort_button_closes_it_last(self):
+        from src.tasks.JunkGearTask import SORT_BUTTON_POINT, SORT_MENU_CLOSE_POINT
+
+        task = self._task(closes_on={3})
+        self.assertTrue(task._close_sort_menu())
+        self.assertEqual([SORT_MENU_CLOSE_POINT] * 2 + [SORT_BUTTON_POINT], task.clicks)
+
+    def test_a_closed_menu_is_not_touched(self):
+        task = self._task(closes_on=set())
+        task.menu_open = False
+        task._close_covering_menu()
+        self.assertEqual([], task.clicks)
+
+
 class OccupiedCellsTest(unittest.TestCase):
     def test_real_filtered_bags(self):
         # Leo's 4K bag 2026-10-11: SR filter 11 items, R filter 4.
@@ -395,7 +482,7 @@ class RunFlowTest(unittest.TestCase):
         task.sets = []
         task._set_bag_filter = lambda wanted: task.sets.append(dict(wanted)) or True
         task.judged = []
-        task._classify_cells = lambda cells, _stars, _frame, grade="R": task.judged.append(
+        task._classify_cells = lambda cells, _stars, _frame, grade="R", fresh=False: task.judged.append(
             (grade, list(cells))
         ) or list(cells)
         task._enhance_and_dismantle = lambda cells, _frame: True
@@ -521,7 +608,7 @@ class FallbackTest(unittest.TestCase):
         task._set_bag_filter = lambda wanted: task.sets.append(dict(wanted)) or False
         task._still_grid_frame = lambda: np.zeros((1080, 1920, 3), np.uint8)
         task.judged = []
-        task._classify_cells = lambda cells, _stars, _frame, grade="R": task.judged.append(
+        task._classify_cells = lambda cells, _stars, _frame, grade="R", fresh=False: task.judged.append(
             (grade, list(cells))
         ) or []
         task._dismantle_crafted_n = lambda: True
@@ -566,7 +653,7 @@ class FallbackTest(unittest.TestCase):
         task.log_info = lambda *a, **k: None
         task.log_warning = lambda *a, **k: None
         task._badged_cells = lambda: set()
-        task._older_cell_kept = lambda *_a: ""
+        task._older_cell_kept = lambda *_a, **_k: ""
         labels = {(0, 0): "R", (0, 1): "UR", (0, 2): None}
         task._grid_rarity = lambda _frame, cell: labels[cell]
         task._wait_detail = lambda *a, **k: self.fail("detail opened")

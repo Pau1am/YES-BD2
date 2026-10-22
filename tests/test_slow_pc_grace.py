@@ -63,7 +63,7 @@ class JunkDetailTest(unittest.TestCase):
         # The SR filter shows an unlocked, unworn SR item: it is opened.
         task._grid_rarity = lambda frame, cell: "SR"
         task._badged_cells = lambda: set()
-        task._older_cell_kept = lambda *_a: ""
+        task._older_cell_kept = lambda *_a, **_k: ""
         task._wait_detail = lambda open_, timeout=0: True
         task.press_and_confirm = lambda label, do, confirmed, **k: do() or True
         reads = iter(reads)
@@ -119,7 +119,7 @@ class JunkFilteredGridTest(unittest.TestCase):
         task._save_filter = lambda _state: None
         task._set_bag_filter = lambda _wanted: True
         judged = []
-        task._classify_cells = lambda cells, _stars, _frame, grade="R": judged.append(
+        task._classify_cells = lambda cells, _stars, _frame, grade="R", fresh=False: judged.append(
             (grade, list(cells))
         ) or []
         # R: an empty look, then the item; SR: empty for good.

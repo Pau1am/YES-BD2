@@ -188,6 +188,16 @@ class PlanTest(unittest.TestCase):
         self.assertNotIn("没持有", keys)
 
 
+class LockedNoteTest(unittest.TestCase):
+    def test_report_says_why_locked_costumes_waited(self):
+        # Leo 2026-10-22 「維持原做法 但報表說一下就好」.
+        from src.tasks.AffinityTalkTask import locked_note
+
+        note = locked_note(["沙漠之刺", "沙漠之花", "沙漠之刺"])
+        self.assertTrue(note.startswith("沙漠之刺、沙漠之花还没释放潜力"))
+        self.assertIn("谈心次数用完", note)
+
+
 class RecordTest(unittest.TestCase):
     def test_round_trip_and_broken_file(self):
         import tempfile

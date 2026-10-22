@@ -166,6 +166,29 @@ class LookTest(unittest.TestCase):
         self.assertEqual([], task.warnings)
         self.assertNotIn(setup_check.COLOUR_KEY, task.info)
 
+    def test_popup_over_home_is_closed_and_the_colours_read_again(self):
+        # Live 2K 2026-10-22: the 公告 list dimmed the top bar only
+        # (钻石 154.6, then 1.0 once it was gone): no HDR reminder.
+        task = _Task()
+        closed = []
+        distance = [150.0]
+
+        def close(label, info_only=False):
+            closed.append(label)
+            distance[0] = 2.0
+            return True
+
+        task.close_known_popup = close
+        reads, _calls = _reads(SIMPLIFIED_LEFT)
+        with reads, mock.patch.object(
+            colour_check,
+            "check_capture_colours",
+            lambda _frame: colour_check.ColourCheck(distance[0], "测试"),
+        ):
+            self.assertEqual("", setup_check.look(task, now=900.0))
+        self.assertEqual(["开跑前检查"], closed)
+        self.assertEqual([], task.warnings)
+
     def test_normal_colours_say_nothing(self):
         task = _Task()
         reads, _calls = _reads(SIMPLIFIED_LEFT)

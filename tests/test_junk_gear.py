@@ -35,7 +35,7 @@ def _blank():
 def _grid_passes(task, rarity="R"):
     """The grid shows an unlocked, unworn, unenhanced item of ``rarity``."""
     task._badged_cells = lambda: set()
-    task._older_cell_kept = lambda *_a: ""
+    task._older_cell_kept = lambda *_a, **_k: ""
     task._grid_rarity = lambda _frame, _cell: rarity
 
 
@@ -686,7 +686,7 @@ class GridShortcutTest(unittest.TestCase):
         task = self._task()
         task.config = {FIVE_STAR_SR_KEY: True}
         _grid_passes(task, rarity="SR")
-        task._older_cell_kept = lambda *_a: "已强化"
+        task._older_cell_kept = lambda *_a, **_k: "已强化"
         with mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=False):
             self.assertEqual([], task._classify_cells([(0, 0)], {}, _blank(), grade="SR"))
         with mock.patch("src.tasks.JunkGearTask.grid_cell_locked", return_value=True):
@@ -787,6 +787,17 @@ class GridLabelCertaintyTest(unittest.TestCase):
         cyan_r = self._label(92, 97, 102, 106, 106, 106)
         self.assertEqual("R", grid_label_rarity(cyan_r))
         self.assertTrue(grid_label_colour_certain(cyan_r, "R"))
+
+    def test_new_r_with_a_red_trace_from_its_badge(self):
+        from src.utils.junk_gear import grid_label_colour_certain, grid_label_rarity
+
+        # Live 2K 2026-10-22: 「绿0.00 青蓝0.94 紫0.00」 beside the new 「!」
+        # (6 % red) was left 「认不出」 and the R kept.
+        r_with_red = self._label(*([106] * 16 + [3]))
+        self.assertEqual("R", grid_label_rarity(r_with_red))
+        self.assertTrue(grid_label_colour_certain(r_with_red, "R"))
+        # With purple as well it is not certain (the label OCR decides).
+        self.assertFalse(grid_label_colour_certain(self._label(*([106] * 14 + [3, 140, 140])), "R"))
 
     def test_ur_gradient_or_green_n_is_never_r(self):
         from src.utils.junk_gear import grid_label_colour_certain, grid_label_rarity
@@ -989,7 +1000,12 @@ class SortLabelTest(unittest.TestCase):
         reads see instead (the menu fading in)."""
         from types import SimpleNamespace as Box
 
-        from src.tasks.JunkGearTask import JunkGearTask, sort_category, sort_direction
+        from src.tasks.JunkGearTask import (
+            SORT_MENU_CLOSE_POINT,
+            JunkGearTask,
+            sort_category,
+            sort_direction,
+        )
 
         task = object.__new__(JunkGearTask)
         task.info_set = lambda *a: None
@@ -997,14 +1013,24 @@ class SortLabelTest(unittest.TestCase):
         task.log_warning = lambda *a, **k: None
         task.sleep = lambda *a: None
         task.scroll_client = lambda *a, **k: None
-        task._click_reference = lambda *a, **k: None
         task.saved = []
         task._save_sort = task.saved.append
         task._clear_saved_sort = lambda: None
-        task.menu = {"active": active}
+        task.menu = {"active": active, "open": True}
         pending = list(reads)
 
+        def click(x, y, **_kwargs):
+            # The menu closes now that closing is checked.
+            if (x, y) == SORT_MENU_CLOSE_POINT:
+                task.menu["open"] = False
+
+        def open_menu():
+            task.menu["open"] = True
+            return boxes()
+
         def boxes():
+            if not task.menu["open"]:
+                return []
             label = pending.pop(0) if pending else task.menu["active"]
             current = sort_category(task.menu["active"])
             return [Box(name=label)] + [Box(name=f"按{k}排序") for k in kinds if k != current]
@@ -1020,7 +1046,8 @@ class SortLabelTest(unittest.TestCase):
             task.menu["active"] = f"按{kind}从{direction}排序"
 
         task._sort_menu_boxes = boxes
-        task._open_sort_menu = boxes
+        task._open_sort_menu = open_menu
+        task._click_reference = click
         task._click_reference_box = pick
         return task
 
@@ -1181,7 +1208,7 @@ class CraftNWhenNothingDismantledTest(unittest.TestCase):
         task._clear_pending = lambda: None
         _filter_stubs(task)
         # Every shown item is junk here.
-        task._classify_cells = lambda cells, stars, frame, grade="R": list(cells)
+        task._classify_cells = lambda cells, stars, frame, grade="R", fresh=False: list(cells)
         task._enhance_and_dismantle = mock.Mock(return_value=dismantle_ok)
         task._open_craft_page = mock.Mock(return_value=True)
         task._open_n_recipe = lambda: True
@@ -1249,7 +1276,7 @@ class AfterGachaNewMarkedTest(unittest.TestCase):
         _filter_stubs(task)
         task._read_bag_filter = mock.Mock(return_value={"grade": None, "worn": True})
         task.judged = []
-        task._classify_cells = lambda cells, stars, frame, grade="R": task.judged.append(
+        task._classify_cells = lambda cells, stars, frame, grade="R", fresh=False: task.judged.append(
             (grade, list(cells))
         ) or list(cells)
         task._enhance_and_dismantle = mock.Mock(return_value=dismantle_ok)
@@ -1295,7 +1322,7 @@ class AfterGachaNewMarkedTest(unittest.TestCase):
 
         task = self._task([(0, 0), (0, 1), (0, 2)])
 
-        def kept_all(cells, stars, frame, grade="R"):
+        def kept_all(cells, stars, frame, grade="R", fresh=False):
             task.judged.append((grade, list(cells)))
             task._kept_reasons = ["UR", "UR", "稀有度认不出"] if grade is None else []
             return []

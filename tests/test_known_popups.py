@@ -34,7 +34,9 @@ class PickTest(unittest.TestCase):
         self.assertIsNone(known_popups.pick(_boxes("是否购买", "消耗 100 钻石", "确认")))
 
     def test_reward_overlays_and_info_confirms(self):
-        self.assertEqual(known_popups.pick(_boxes("赛季奖励", "点击画面即可返回")).label, "点击画面即可返回")
+        self.assertEqual(
+            known_popups.pick(_boxes("赛季奖励", "点击画面即可返回")).label, "点击画面即可返回"
+        )
         self.assertEqual(known_popups.pick(_boxes("获得道具", "确认")).label, "确认")
         self.assertEqual(known_popups.pick(_boxes("公告", "关闭")).label, "关闭")
 
@@ -59,7 +61,9 @@ class QuitDialogOnTheWayHomeTest(unittest.TestCase):
             operate_click=lambda x, y, after_sleep=0: clicks.append((x, y)),
             _ocr_box_center=lambda box: (box.x + 20, box.y + 10),
         )
-        vision = SimpleNamespace(ocr_boxes=lambda frame, name: _boxes("要关闭游戏吗", "取消", "确认"))
+        vision = SimpleNamespace(
+            ocr_boxes=lambda frame, name: _boxes("要关闭游戏吗", "取消", "确认")
+        )
         self.assertEqual("quit", recovery._handle_dialog(task, vision))
         self.assertEqual(clicks, [((160 + 20) / 1920, 110 / 1080)])
 
@@ -93,14 +97,16 @@ class EscapeStepTest(unittest.TestCase):
             tap_key=lambda key, after_sleep=0: press(key),
             tap_escape=lambda after_sleep=0: press("esc"),
         )
-        with mock.patch.object(recovery, "Vision", lambda t: navigator.vision), mock.patch.object(
-            recovery, "Navigator", lambda t, v: navigator
-        ), mock.patch.object(
-            recovery, "_handle_dialog", lambda t, v: outcomes.pop(0) if outcomes else "none"
-        ), mock.patch.object(recovery, "_note_leaving_step", lambda *a: None), mock.patch.object(
-            recovery, "_keep_failure_picture", lambda *a: None
-        ), mock.patch.object(recovery, "BACK_HOME_WAIT_SECONDS", 0.0), mock.patch.object(
-            recovery, "UNKNOWN_SETTLE_SECONDS", 0.0
+        with (
+            mock.patch.object(recovery, "Vision", lambda t: navigator.vision),
+            mock.patch.object(recovery, "Navigator", lambda t, v: navigator),
+            mock.patch.object(
+                recovery, "_handle_dialog", lambda t, v: outcomes.pop(0) if outcomes else "none"
+            ),
+            mock.patch.object(recovery, "_note_leaving_step", lambda *a: None),
+            mock.patch.object(recovery, "_keep_failure_picture", lambda *a: None),
+            mock.patch.object(recovery, "BACK_HOME_WAIT_SECONDS", 0.0),
+            mock.patch.object(recovery, "UNKNOWN_SETTLE_SECONDS", 0.0),
         ):
             result = recovery.recover_to_home(task)
         return result, events
@@ -126,3 +132,90 @@ class EscapeStepTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoButtonPopupsTest(unittest.TestCase):
+    """Live 2K 2026-10-22: two popups with no text button stopped 一键日常."""
+
+    def test_season_reward_without_button_is_tapped_on_its_line(self):
+        boxes = _boxes("魔兽追踪者赛季奖励", "深渊魔姬卡（水）", "奖励", "奖励已发放至背包。")
+        press = known_popups.pick(boxes)
+        self.assertEqual("点击画面返回", press.label)
+        self.assertIs(boxes[3], press.box)
+
+    def test_season_reward_with_confirm_still_presses_confirm(self):
+        boxes = _boxes("奖励已发放至背包", "确认")
+        self.assertEqual("确认", known_popups.pick(boxes).label)
+
+    def test_notice_list_closes_with_esc(self):
+        boxes = _boxes(
+            "公告",
+            "10月22日(四)定期维护及更新完成公告",
+            "2026年10月22日",
+            "公告",
+            "10月22日更新后出售的商品资讯",
+            "2026年10月20日",
+            "更新",
+            "2026年10月20日",
+        )
+        self.assertTrue(known_popups.is_notice_list(boxes))
+        press = known_popups.pick(boxes)
+        self.assertEqual(known_popups.ESC_LABEL, press.key)
+
+    def test_one_dated_line_is_not_a_notice_list(self):
+        self.assertFalse(known_popups.is_notice_list(_boxes("公告", "2026年10月22日")))
+        self.assertIsNone(known_popups.pick(_boxes("公告", "2026年10月22日", "购买")))
+
+    def _pass_signin(self):
+        # Live 4K 2026-10-22 (3840x2160), 「午夜装扮之选通行证」 over 主页.
+        return [
+            SimpleNamespace(name="我的小屋", x=200, y=340, width=90, height=50),
+            SimpleNamespace(name="活动还剩13天", x=720, y=450, width=300, height=52),
+            SimpleNamespace(name="签到成功", x=1652, y=1048, width=232, height=68),
+            SimpleNamespace(name="午夜装扮之选通行证", x=688, y=1155, width=696, height=80),
+            SimpleNamespace(name="活动期间，连续3天签到可获得奖励", x=688, y=1255, width=900, height=50),
+            SimpleNamespace(name="购买后可获得额外奖励！", x=688, y=1322, width=620, height=50),
+            SimpleNamespace(name="各账号可购买0/1次", x=832, y=1469, width=380, height=48),
+            SimpleNamespace(name="购买JP¥1,140", x=856, y=1552, width=416, height=80),
+        ]
+
+    def test_pass_signin_is_closed_left_of_the_panel_never_on_buy(self):
+        boxes = self._pass_signin()
+        press = known_popups.pick(boxes)
+        self.assertEqual(known_popups.PASS_SIGNIN_LABEL, press.label)
+        self.assertEqual("", press.key)
+        # Left of the panel (starts at x 620), on the backdrop where the live
+        # blank tap at x 338 closed it; nowhere near 购买 (x 856-1272).
+        self.assertLess(press.box.x, 600)
+        self.assertGreater(press.box.x, 200)
+        self.assertAlmostEqual(1347, press.box.y)
+
+    def test_pass_signin_tap_reaches_the_click(self):
+        task = SimpleNamespace(
+            capture_frame=lambda: np.zeros((2160, 3840, 3), np.uint8),
+            log_info=lambda *a, **k: None,
+            _ocr_box_center=recovery.BaseBD2Task._ocr_box_center,
+            operate_click=mock.Mock(),
+        )
+        vision = SimpleNamespace(ocr_boxes=lambda frame, name: self._pass_signin())
+        self.assertEqual("dismissed", recovery._handle_dialog(task, vision))
+        x, y = task.operate_click.call_args.args
+        self.assertLess(x * 3840, 600)
+        self.assertGreater(y, 0.5)
+
+    def test_buy_text_alone_is_not_the_pass_signin(self):
+        self.assertIsNone(known_popups.pass_signin_spot(_boxes("通行证", "购买")))
+        self.assertIsNone(known_popups.pass_signin_spot(_boxes("购买后可获得额外奖励")))
+        self.assertIsNone(known_popups.pick(_boxes("通行证", "签到", "购买")))
+
+    def test_way_home_presses_esc_for_the_notice_list(self):
+        names = ("公告", "2026年10月22日", "更新", "2026年10月20日")
+        escapes = []
+        task = SimpleNamespace(
+            capture_frame=lambda: np.zeros((1080, 1920, 3), np.uint8),
+            log_info=lambda *a, **k: None,
+            tap_escape=lambda after_sleep=0: escapes.append(after_sleep) or True,
+        )
+        vision = SimpleNamespace(ocr_boxes=lambda frame, name: _boxes(*names))
+        self.assertEqual("dismissed", recovery._handle_dialog(task, vision))
+        self.assertEqual(1, len(escapes))
