@@ -1,6 +1,7 @@
 # ruff: noqa: E501
 
 import os
+import sys
 import tomllib
 from pathlib import Path
 
@@ -8,18 +9,51 @@ from ok import Box
 from ok.util.GlobalConfig import create_basic_options
 
 from src import GAME_EXE, HWND_CLASS
-from src.capture.hdr_wgc import install as install_hdr_aware_capture
 from src.compat.about_tab_layout import install_about_tab_layout
-from src.compat.launcher_update_notice import install_launcher_update_notice
-from src.compat.main_window_geometry import install_main_window_geometry_debounce
-from src.compat.ocr_memory import install_ocr_memory_cap
-from src.compat.quiet_scheduled_open import install as install_quiet_scheduled_open
-from src.compat.starter_guard import enable_starter_launch_guard
-from src.compat.starter_launch import enable_starter_launch_uri
 from src.compat.update_card_ui import install_update_card_ui
-from src.compat.windows_graphics import WGC_MIN_CAPTURE_SIZE, enable_windows_10_wgc
 from src.game_path import calculate_pc_exe_path
-from src.interaction.BD2Interaction import BD2Interaction
+
+if sys.platform == "win32":
+    from src.capture.hdr_wgc import install as install_hdr_aware_capture
+    from src.compat.launcher_update_notice import install_launcher_update_notice
+    from src.compat.main_window_geometry import install_main_window_geometry_debounce
+    from src.compat.ocr_memory import install_ocr_memory_cap
+    from src.compat.quiet_scheduled_open import install as install_quiet_scheduled_open
+    from src.compat.starter_guard import enable_starter_launch_guard
+    from src.compat.starter_launch import enable_starter_launch_uri
+    from src.compat.windows_graphics import WGC_MIN_CAPTURE_SIZE, enable_windows_10_wgc
+    from src.interaction.BD2Interaction import BD2Interaction
+else:
+    # macOS 走 ADB 设备，下面这些 Windows 专用能力用不到。保留同名占位，
+    # 让本文件的其余部分（含 "windows" 配置段）不需要改动；
+    # src/macos/config.py 会在启动时把 "windows" 段整个移除。
+    WGC_MIN_CAPTURE_SIZE = (1280, 720)
+    BD2Interaction = None
+
+    def install_hdr_aware_capture() -> None:
+        return None
+
+    def install_launcher_update_notice() -> None:
+        return None
+
+    def install_main_window_geometry_debounce() -> None:
+        return None
+
+    def install_ocr_memory_cap() -> None:
+        return None
+
+    def install_quiet_scheduled_open() -> None:
+        return None
+
+    def enable_starter_launch_guard() -> None:
+        return None
+
+    def enable_starter_launch_uri() -> None:
+        return None
+
+    def enable_windows_10_wgc() -> None:
+        return None
+
 from src.process_feature import process_feature
 from src.ui.quest_theme import apply_app_font
 from src.ui.quest_ui import install_quest_ui
@@ -40,17 +74,18 @@ def runtime_version(project_file: Path | None = None) -> str:
     return version
 
 apply_app_font()
-enable_windows_10_wgc()
-# Windows HDR: capture 16-bit float and convert back to the game's SDR image
-# (8-bit WGC frames come out over-exposed and every colour check drifts).
-install_hdr_aware_capture()
-# OCR memory: cap OpenVINO's per-input-size kernel cache (grew to 9.6 GB).
-install_ocr_memory_cap()
-enable_starter_launch_uri()
-enable_starter_launch_guard()
-install_main_window_geometry_debounce()
-install_launcher_update_notice()
-install_quiet_scheduled_open()
+if sys.platform == "win32":
+    enable_windows_10_wgc()
+    # Windows HDR: capture 16-bit float and convert back to the game's SDR image
+    # (8-bit WGC frames come out over-exposed and every colour check drifts).
+    install_hdr_aware_capture()
+    # OCR memory: cap OpenVINO's per-input-size kernel cache (grew to 9.6 GB).
+    install_ocr_memory_cap()
+    enable_starter_launch_uri()
+    enable_starter_launch_guard()
+    install_main_window_geometry_debounce()
+    install_launcher_update_notice()
+    install_quiet_scheduled_open()
 install_quest_ui()
 install_update_card_ui()
 install_about_tab_layout()

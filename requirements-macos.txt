@@ -1,0 +1,38 @@
+# macOS (Apple Silicon) 运行依赖
+#
+# ok-script 的依赖里写死了 pywin32（Windows 专用），在 macOS 上 pip 装它会失败，
+# 所以先单独装它、再加这份清单：
+#
+#   pip install --no-deps "ok-script[ocr,qt]==2.0.6"
+#   pip install -r requirements-macos.txt
+#
+# 装了 scripts/install_macos.sh 的话，这些步骤它会替你做。
+
+numpy>=2.0,<2.5
+opencv-python>=4.10
+pillow>=10
+psutil>=6
+requests>=2.32
+typing-extensions>=4.11
+
+# 设备通道：ADB
+adbutils>=2.8
+
+# 界面
+pyside6==6.9.1
+pyside6-essentials==6.9.1
+pyside6-fluent-widgets>=1.8.3
+darkdetect>=0.8
+
+# OCR（Apple Silicon 走 onnxruntime CPU；OpenVINO 的 arm64 轮子也能用，但不必需）
+onnxruntime>=1.17
+onnxocr-ppocrv5==0.0.22
+opencc>=1.2
+shapely>=2.0
+pyclipper>=1.3
+
+# 全局输入监听（接手检测用；macOS 需要「辅助功能」权限）
+pynput>=1.8.1
+
+# ok-script 的启动器 SDK（纯 Python；装不上时 win32_shim 会提供替身）
+pyappify>=1.0.9
